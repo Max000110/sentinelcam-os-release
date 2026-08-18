@@ -1,0 +1,74 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+env/
+.venv/
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Android
+*.iml
+.gradle/
+**/build/
+/captures
+.externalNativeBuild
+.cxx
+local.properties
+*.jks
+*.keystore
+key.properties
+google-services.json
+
+# IDE
+.idea/
+*.swp
+*.swo
+*~
+.vscode/
+
+# Node
+node_modules/
+.next/
+
+# Database & Data
+*.db
+*.sqlite3
+*.sql
+*.dump
+uploads/
+backups/
+
+# Logs & Test Results
+*.log
+test-results/
+reports/
+coverage/
+
+# Secrets & Certificates
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+secrets/
+credentials/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Generated
+*.apk
+*.aab
+dist/
+out/
+
+# Temporary
+*.bak
+*.tmp
+*.swp
