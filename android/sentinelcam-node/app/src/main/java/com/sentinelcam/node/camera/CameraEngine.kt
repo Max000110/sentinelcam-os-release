@@ -15,6 +15,10 @@ import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 
+import androidx.camera.core.resolutionselector.AspectRatioStrategy
+import androidx.camera.core.resolutionselector.ResolutionSelector
+import androidx.camera.core.resolutionselector.ResolutionStrategy
+
 class CameraEngine(
     private val context: Context,
     private val lifecycleOwner: LifecycleOwner,
@@ -22,6 +26,7 @@ class CameraEngine(
 ) {
     companion object {
         private const val TAG = "SentinelCam.CameraEngine"
+        // Standard 640x480 resolution (4:3) — widely hardware-accelerated
         private const val TARGET_WIDTH = 640
         private const val TARGET_HEIGHT = 480
     }
@@ -32,13 +37,12 @@ class CameraEngine(
     private val isStopping = AtomicBoolean(false)
 
     // Pre-allocated reusable buffer to eliminate per-frame GC pressure
-    // 640x480 * 1.5 = 460800 bytes (vs 1382400 for 1280x720)
     @Volatile
     private var reusableNv21: ByteArray = ByteArray(TARGET_WIDTH * TARGET_HEIGHT * 3 / 2)
 
     // Reusable row buffer for UV conversion
     @Volatile
-    private var reusableUvRowBuf: ByteArray = ByteArray(TARGET_WIDTH) // uvWidth * 2
+    private var reusableUvRowBuf: ByteArray = ByteArray(TARGET_WIDTH)
 
     var currentLensFacing = CameraSelector.LENS_FACING_BACK
     var isTorchEnabled = false
@@ -78,8 +82,18 @@ class CameraEngine(
                 .requireLensFacing(currentLensFacing)
                 .build()
 
+            val resolutionSelector = ResolutionSelector.Builder()
+                .setResolutionStrategy(
+                    ResolutionStrategy(
+                        Size(TARGET_WIDTH, TARGET_HEIGHT),
+                        ResolutionStrategy.FALLBACK_RULE_CLOSEST_LOWER_THEN_HIGHER
+                    )
+                )
+                .setAspectRatioStrategy(AspectRatioStrategy.RATIO_4_3_FALLBACK_AUTO_STRATEGY)
+                .build()
+
             val imageAnalysis = ImageAnalysis.Builder()
-                .setTargetResolution(Size(TARGET_WIDTH, TARGET_HEIGHT))
+                .setResolutionSelector(resolutionSelector)
                 .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_YUV_420_888)
                 .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
                 .build()
@@ -101,14 +115,14 @@ class CameraEngine(
                     val requiredSize = width * height * 3 / 2
                     if (reusableNv21.size != requiredSize) {
                         reusableNv21 = ByteArray(requiredSize)
-                        reusableUvRowBuf = ByteArray(width) // uvWidth * 2
+                        reusableUvRowBuf = ByteArray(width)
                     }
 
                     val startNs = System.nanoTime()
                     imageProxyToNv21Fast(imageProxy, reusableNv21)
                     val convNs = System.nanoTime() - startNs
 
-                    // Log conversion time every 150 frames (~5 seconds at 30fps)
+                    // Log conversion time every 150 frames
                     totalConversionTimeNs += convNs
                     conversionSamples++
                     if (conversionSamples >= 150) {

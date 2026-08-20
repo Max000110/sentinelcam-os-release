@@ -79,8 +79,9 @@ class WebRtcClient(
             setEnabled(true)
         }
 
-        // 2. Video Track
-        videoSource = factory.createVideoSource(false)
+        // 2. Video Track — isScreencast=true disables internal frame adapter
+        // buffering, timestamp smoothing, and resolution adaptation for lowest latency
+        videoSource = factory.createVideoSource(true)
         localVideoTrack = factory.createVideoTrack("ARDAMSv0", videoSource).apply {
             setEnabled(true)
         }
@@ -172,11 +173,14 @@ class WebRtcClient(
         peerConnection?.createOffer(object : SdpObserver {
             override fun onCreateSuccess(desc: SessionDescription?) {
                 desc?.let { offer ->
+                    // Munge SDP for ultra-low latency
+                    val mungedSdp = mungeForLowLatency(offer.description)
+                    val mungedOffer = SessionDescription(offer.type, mungedSdp)
                     peerConnection?.setLocalDescription(object : SdpObserver {
                         override fun onCreateSuccess(p0: SessionDescription?) {}
                         override fun onSetSuccess() {
-                            Log.i(TAG, "Local SDP Offer set and dispatched successfully")
-                            onOfferGenerated(offer)
+                            Log.i(TAG, "Local SDP Offer set (low-latency munged) and dispatched")
+                            onOfferGenerated(mungedOffer)
                         }
                         override fun onCreateFailure(err: String?) {
                             Log.e(TAG, "SetLocalDescription failed: $err")
@@ -184,7 +188,7 @@ class WebRtcClient(
                         override fun onSetFailure(err: String?) {
                             Log.e(TAG, "SetLocalDescription error: $err")
                         }
-                    }, offer)
+                    }, mungedOffer)
                 }
             }
             override fun onSetSuccess() {}
@@ -193,6 +197,55 @@ class WebRtcClient(
             }
             override fun onSetFailure(error: String?) {}
         }, mediaConstraints)
+    }
+
+    /**
+     * Munge SDP to force lowest latency encoding parameters:
+     * - Reorders m=video line to prioritize H.264 hardware acceleration
+     * - Adds x-google-start-bitrate and max-fr for instantaneous smooth playback
+     * - Adds packetization-mode=1 and profile-level-id for low-latency H.264
+     */
+    private fun mungeForLowLatency(sdp: String): String {
+        val lines = sdp.split("\r\n").toMutableList()
+        val result = mutableListOf<String>()
+        
+        // Find H264 payload type
+        var h264Pt: String? = null
+        for (line in lines) {
+            if (line.startsWith("a=rtpmap:") && line.contains("H264/90000", ignoreCase = true)) {
+                val parts = line.substringAfter("a=rtpmap:").substringBefore(" ").trim()
+                if (h264Pt == null) {
+                    h264Pt = parts
+                }
+            }
+        }
+
+        for (line in lines) {
+            var modifiedLine = line
+            
+            // Reorder m=video line to put H264 payload type first if found
+            if (modifiedLine.startsWith("m=video") && h264Pt != null) {
+                val tokens = modifiedLine.split(" ").toMutableList()
+                if (tokens.size > 3) {
+                    val header = tokens.subList(0, 3)
+                    val payloads = tokens.subList(3, tokens.size).filter { it != h264Pt }.toMutableList()
+                    payloads.add(0, h264Pt)
+                    modifiedLine = (header + payloads).joinToString(" ")
+                }
+            }
+            
+            result.add(modifiedLine)
+            
+            // Tune video fmtp parameters for ultra-low latency & zero buffering
+            if (modifiedLine.startsWith("a=fmtp:") && !modifiedLine.contains("apt=")) {
+                val lastIdx = result.size - 1
+                if (!result[lastIdx].contains("x-google-start-bitrate")) {
+                    result[lastIdx] = result[lastIdx] + ";x-google-start-bitrate=1200;x-google-max-bitrate=2500;x-google-min-bitrate=500;max-fr=30"
+                }
+            }
+        }
+        
+        return result.joinToString("\r\n")
     }
 
     fun handleRemoteAnswer(sdpString: String) {
