@@ -76,7 +76,7 @@ async def ingest_ai_event(
             raise HTTPException(status_code=413, detail="Snapshot image exceeds 10MB limit")
 
         safe_device_id = re.sub(r"[^a-zA-Z0-9_-]", "", device_id)
-        filename = f"ai_{safe_device_id}_{int(datetime.now().timestamp())}.jpg"
+        filename = f"ai_{safe_device_id}_{int(datetime.now(timezone.utc).timestamp())}.jpg"
         snapshots_dir = (Path(__file__).resolve().parent.parent.parent / "uploads" / "snapshots").resolve()
         target_path = (snapshots_dir / filename).resolve()
         if not target_path.is_relative_to(snapshots_dir):

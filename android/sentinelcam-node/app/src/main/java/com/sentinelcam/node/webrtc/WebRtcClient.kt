@@ -240,7 +240,7 @@ class WebRtcClient(
             result.add(modifiedLine)
             
             // Tune video fmtp parameters for ultra-low latency & zero buffering
-            if (modifiedLine.startsWith("a=fmtp:") && !modifiedLine.contains("apt=")) {
+            if (h264Pt != null && modifiedLine.startsWith("a=fmtp:$h264Pt") && !modifiedLine.contains("apt=")) {
                 val lastIdx = result.size - 1
                 if (!result[lastIdx].contains("x-google-start-bitrate")) {
                     result[lastIdx] = result[lastIdx] + ";x-google-start-bitrate=1200;x-google-max-bitrate=2500;x-google-min-bitrate=500;max-fr=30"

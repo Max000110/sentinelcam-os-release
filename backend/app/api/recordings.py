@@ -100,7 +100,7 @@ async def upload_recording_segment(
     sha256_hash = hashlib.sha256(content).hexdigest()
 
     safe_device_id = re.sub(r"[^a-zA-Z0-9_-]", "", device_id)
-    filename = f"{safe_device_id}_{int(datetime.now().timestamp())}_{uuid.uuid4().hex[:6]}.mp4"
+    filename = f"{safe_device_id}_{int(datetime.now(timezone.utc).timestamp())}_{uuid.uuid4().hex[:6]}.mp4"
     filepath = str((Path(RECORDINGS_DIR) / filename).resolve())
     
     # Path traversal assertion

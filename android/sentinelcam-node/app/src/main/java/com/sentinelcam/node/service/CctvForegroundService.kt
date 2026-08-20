@@ -273,6 +273,7 @@ class CctvForegroundService : LifecycleService() {
         webRtcClient?.close()
         signalingClient?.disconnect()
         aiDetector?.shutdown()
+        recorder?.shutdown()
 
         wakeLock?.let { if (it.isHeld) it.release() }
         wifiLock?.let { if (it.isHeld) it.release() }

@@ -5,6 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from app.core.database import get_db
 from app.models.devices import Device, DeviceStatusEnum
+from app.models.users import User
 from app.schemas.device import DeviceRegister, DeviceUpdate, DeviceResponse
 from app.services.signaling_manager import signaling_manager
 
@@ -42,10 +43,13 @@ async def register_device(device_in: DeviceRegister, db: AsyncSession = Depends(
         existing.api_key = f"sk_node_{secrets.token_hex(16)}"
         return existing
         
+    user_res = await db.execute(select(User.id).order_by(User.id.asc()).limit(1))
+    owner_user_id = user_res.scalars().first() or 1
+
     api_key = f"sk_node_{secrets.token_hex(24)}"
     new_device = Device(
         device_id=device_in.device_id,
-        user_id=1,
+        user_id=owner_user_id,
         name=device_in.name,
         resolution=device_in.resolution or "1080p",
         target_fps=device_in.target_fps or 30,

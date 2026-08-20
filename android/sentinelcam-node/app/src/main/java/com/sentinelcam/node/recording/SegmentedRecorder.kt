@@ -139,4 +139,12 @@ class SegmentedRecorder(
         }
         return digest.digest().joinToString("") { "%02x".format(it) }
     }
+
+    fun shutdown() {
+        try {
+            executor.shutdown()
+        } catch (e: Exception) {
+            Log.e(TAG, "Error shutting down recorder executor: ${e.message}")
+        }
+    }
 }

@@ -139,7 +139,9 @@ class SignalingManager:
                     try:
                         await viewer_ws.send_text(raw_text)
                     except Exception as e:
-                        logger.error(f"Error forwarding node message to viewer: {e}")
+                        logger.warning(f"Removing dead viewer connection for {device_id}: {e}")
+                        if device_id in self.active_viewers:
+                            self.active_viewers[device_id].discard(viewer_ws)
         elif sender_role == "viewer":
             # Message from Viewer -> forward to Android node
             if device_id in self.active_nodes:

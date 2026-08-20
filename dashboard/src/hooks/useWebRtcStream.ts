@@ -73,6 +73,7 @@ export function useWebRtcStream(deviceId: string) {
 
   useEffect(() => {
     let isSubscribed = true;
+    let statsInterval: any = null;
 
     async function initWebRtc() {
       try {
@@ -138,7 +139,7 @@ export function useWebRtcStream(deviceId: string) {
         };
 
         // Real latency measurement from WebRTC stats (every 1 second)
-        const statsInterval = setInterval(async () => {
+        statsInterval = setInterval(async () => {
           if (!pc || pc.connectionState !== 'connected') return;
           try {
             const stats = await pc.getStats();
@@ -235,6 +236,7 @@ export function useWebRtcStream(deviceId: string) {
 
     return () => {
       isSubscribed = false;
+      clearInterval(statsInterval);
       if (localMicStreamRef.current) {
         localMicStreamRef.current.getTracks().forEach(t => t.stop());
       }

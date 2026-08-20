@@ -97,6 +97,7 @@ class SignalingClient(
 
     fun disconnect() {
         isClosedManually = true
+        mainHandler.removeCallbacksAndMessages(null)
         webSocket?.close(1000, "Node disconnecting normally")
         webSocket = null
     }
