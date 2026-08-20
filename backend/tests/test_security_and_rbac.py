@@ -6,6 +6,7 @@ from app.core.database import init_db, AsyncSessionLocal
 from app.models.faces import FaceProfile, FaceEmbedding
 from app.models.recordings import Recording
 from app.models.devices import Device, DeviceStatusEnum
+from app.models.users import User
 from app.core.security import create_access_token
 from sqlalchemy.future import select
 
@@ -149,4 +150,71 @@ async def test_path_traversal_recording_rejection():
         }, files={"video_file": ("test.mp4", b"fake_mp4_bytes", "video/mp4")})
         assert res.status_code == 400
         assert "invalid device_id" in res.json()["detail"].lower()
+
+@pytest.mark.asyncio
+async def test_deactivated_user_token_rejection():
+    import uuid
+    uid = uuid.uuid4().hex[:6]
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        # Register user
+        reg_res = await ac.post("/api/v1/auth/register", json={
+            "username": f"deact_{uid}",
+            "email": f"deact_{uid}@test.local",
+            "password": "SecurePassword123!"
+        })
+        assert reg_res.status_code == 200
+
+    # Deactivate user in DB
+    async with AsyncSessionLocal() as db:
+        u_res = await db.execute(select(User).where(User.username == f"deact_{uid}"))
+        user = u_res.scalars().first()
+        user.is_active = False
+        await db.commit()
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        # Login attempt must fail with 403
+        login_res = await ac.post("/api/v1/auth/login", data={
+            "username": f"deact_{uid}",
+            "password": "SecurePassword123!"
+        })
+        assert login_res.status_code == 403
+        assert "deactivated" in login_res.json()["detail"].lower()
+
+        # Direct token attempt must also fail with 403
+        token = create_access_token(subject=f"deact_{uid}")
+        me_res = await ac.get("/api/v1/auth/me", headers={"Authorization": f"Bearer {token}"})
+        assert me_res.status_code == 403
+        assert "deactivated" in me_res.json()["detail"].lower()
+
+@pytest.mark.asyncio
+async def test_tripwire_coordinate_normalization_validation():
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        # Tripwire with invalid unnormalized coordinates (> 1.0)
+        invalid_tw = {
+            "name": "Perimeter Line",
+            "point_a_x": 1.5,
+            "point_a_y": 0.2,
+            "point_b_x": 0.5,
+            "point_b_y": 0.5
+        }
+        res = await ac.post("/api/v1/devices/cam_livingroom_01/tripwires", json=invalid_tw)
+        assert res.status_code == 422
+
+@pytest.mark.asyncio
+async def test_pairing_code_security_and_validation():
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        # Generate pairing code
+        gen_res = await ac.post("/api/v1/devices/pairing/generate")
+        assert gen_res.status_code == 200
+        code = gen_res.json()["pairing_code"]
+        assert code.startswith("SENT-")
+        assert len(code) == 11 # SENT- + 6 hex
+
+        # Claim with invalid device_id format (special characters)
+        claim_res = await ac.post("/api/v1/devices/pairing/claim", json={
+            "pairing_code": code,
+            "device_id": "../invalid/id",
+            "device_name": "Living Room Cam"
+        })
+        assert claim_res.status_code == 422
 

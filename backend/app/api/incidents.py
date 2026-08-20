@@ -1,13 +1,15 @@
+import re
 import secrets
 from datetime import datetime, timedelta, timezone
 from typing import List, Optional
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from app.core.database import get_db
 from app.models.incidents_and_audit import Incident
 from app.models.devices import PairingCode, Device, DeviceStatusEnum
+from app.models.users import User
 
 router = APIRouter(tags=["Incidents & Device Pairing"])
 
@@ -16,6 +18,13 @@ class PairingClaimRequest(BaseModel):
     device_id: str
     device_name: str
     platform: str = "android"
+
+    @field_validator("device_id")
+    @classmethod
+    def validate_device_id(cls, v: str) -> str:
+        if not re.match(r"^[a-zA-Z0-9_-]{3,64}$", v):
+            raise ValueError("device_id must be 3-64 characters containing alphanumeric, dashes, or underscores")
+        return v
 
 @router.get("/incidents")
 async def list_incidents(status: Optional[str] = None, db: AsyncSession = Depends(get_db)):
@@ -43,10 +52,13 @@ async def update_incident_status(incident_id: int, new_status: str, db: AsyncSes
 
 @router.post("/devices/pairing/generate")
 async def generate_pairing_code(device_name: str = "Android CCTV Camera", db: AsyncSession = Depends(get_db)):
-    # Generate 8-character single-use code e.g. "SENT-8492"
-    code_str = f"SENT-{secrets.token_hex(2).upper()}"
+    # Generate high-entropy single-use pairing code e.g. "SENT-8492AF"
+    code_str = f"SENT-{secrets.token_hex(3).upper()}"
+    user_res = await db.execute(select(User.id).order_by(User.id.asc()).limit(1))
+    owner_user_id = user_res.scalars().first() or 1
+
     p_code = PairingCode(
-        user_id=1,
+        user_id=owner_user_id,
         code=code_str,
         device_name=device_name,
         expires_at=datetime.now(timezone.utc) + timedelta(minutes=15),

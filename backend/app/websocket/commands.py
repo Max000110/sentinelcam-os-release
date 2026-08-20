@@ -68,8 +68,11 @@ async def command_hub_endpoint(websocket: WebSocket, device_id: str):
             text = await websocket.receive_text()
             if len(text) > 16384:
                 continue
-            data = json.loads(text)
-            if data.get("type") == "command_ack":
+            try:
+                data = json.loads(text)
+            except (json.JSONDecodeError, TypeError):
+                continue
+            if isinstance(data, dict) and data.get("type") == "command_ack":
                 logger.info(f"Node {device_id} ACK command: {data.get('command_id')}")
     except WebSocketDisconnect:
         command_hub.unregister_node(device_id)

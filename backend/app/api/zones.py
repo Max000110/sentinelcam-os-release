@@ -1,6 +1,6 @@
 import json
 from typing import List, Optional
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
@@ -22,6 +22,13 @@ class TripwireCreate(BaseModel):
     point_b_x: float
     point_b_y: float
     direction: TripwireDirection = TripwireDirection.ANY
+
+    @field_validator("point_a_x", "point_a_y", "point_b_x", "point_b_y")
+    @classmethod
+    def validate_normalized_coord(cls, v: float) -> float:
+        if not (0.0 <= v <= 1.0):
+            raise ValueError("Tripwire coordinates must be normalized between 0.0 and 1.0")
+        return v
 
 @router.get("/devices/{device_id}/zones")
 async def get_device_zones(device_id: str, db: AsyncSession = Depends(get_db)):

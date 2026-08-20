@@ -9,6 +9,7 @@ interface CameraControlsProps {
 
 export function CameraControls({ onSendCommand }: CameraControlsProps) {
   const [torchOn, setTorchOn] = useState(false);
+  const [guardInfo, setGuardInfo] = useState<string | null>(null);
 
   const handleToggleTorch = () => {
     const newState = !torchOn;
@@ -20,6 +21,11 @@ export function CameraControls({ onSendCommand }: CameraControlsProps) {
     onSendCommand("switch_camera");
   };
 
+  const handleShowGuardInfo = () => {
+    setGuardInfo("Local YUV Motion Analyzer active on device (Threshold: 50)");
+    setTimeout(() => setGuardInfo(null), 3500);
+  };
+
   return (
     <div className="card" style={{ marginTop: 20 }}>
       <h3 style={{ fontSize: "1rem", marginBottom: 14, display: "flex", alignItems: "center", gap: 8 }}>
@@ -27,7 +33,7 @@ export function CameraControls({ onSendCommand }: CameraControlsProps) {
         <span>Remote Hardware Controls</span>
       </h3>
 
-      <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+      <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
         <button
           className={`btn ${torchOn ? "btn-primary" : "btn-secondary"}`}
           onClick={handleToggleTorch}
@@ -43,11 +49,17 @@ export function CameraControls({ onSendCommand }: CameraControlsProps) {
 
         <button
           className="btn btn-secondary"
-          onClick={() => alert("Local YUV Motion Analyzer active on device (Threshold: 50)")}
+          onClick={handleShowGuardInfo}
         >
           <ShieldCheck size={16} color="#00e676" />
           Motion Guard: ACTIVE
         </button>
+
+        {guardInfo && (
+          <span style={{ fontSize: "0.85rem", color: "#00e676", marginLeft: 8 }}>
+            {guardInfo}
+          </span>
+        )}
       </div>
     </div>
   );

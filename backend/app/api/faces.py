@@ -66,8 +66,12 @@ async def enroll_face_profile(payload: FaceEnrollRequest, db: AsyncSession = Dep
     cipher = _get_biometric_cipher()
     encrypted_payload = cipher.encrypt(vector_bytes).decode("utf-8")
 
+    from app.models.users import User
+    user_res = await db.execute(select(User.id).order_by(User.id.asc()).limit(1))
+    owner_user_id = user_res.scalars().first() or 1
+
     profile = FaceProfile(
-        user_id=1,
+        user_id=owner_user_id,
         display_name=payload.display_name,
         status="ACTIVE",
         consent_granted=True

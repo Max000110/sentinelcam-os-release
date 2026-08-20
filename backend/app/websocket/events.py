@@ -50,8 +50,12 @@ async def event_stream_endpoint(websocket: WebSocket, device_id: str):
             data_text = await websocket.receive_text()
             if len(data_text) > 32768:
                 continue
-            data = json.loads(data_text)
-            await event_stream_manager.broadcast(device_id, data)
+            try:
+                data = json.loads(data_text)
+            except (json.JSONDecodeError, TypeError):
+                continue
+            if isinstance(data, dict):
+                await event_stream_manager.broadcast(device_id, data)
     except WebSocketDisconnect:
         event_stream_manager.disconnect(device_id, websocket)
     except Exception as e:

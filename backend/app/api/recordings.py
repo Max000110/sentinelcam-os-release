@@ -157,29 +157,41 @@ async def stream_recording_playback(
         range_header = range.strip().lower()
         if range_header.startswith("bytes="):
             byte_range = range_header[6:].split("-")
-            start = int(byte_range[0])
-            end = int(byte_range[1]) if byte_range[1] else file_size - 1
-            length = (end - start) + 1
+            try:
+                start = int(byte_range[0]) if byte_range[0] else 0
+                end = int(byte_range[1]) if (len(byte_range) > 1 and byte_range[1]) else file_size - 1
+                if start < 0 or start >= file_size or end < start:
+                    raise HTTPException(
+                        status_code=status.HTTP_416_REQUESTED_RANGE_NOT_SATISFIABLE,
+                        headers={"Content-Range": f"bytes */{file_size}"}
+                    )
+                end = min(end, file_size - 1)
+                length = (end - start) + 1
 
-            def iter_file_range():
-                with open(path, "rb") as f:
-                    f.seek(start)
-                    bytes_left = length
-                    while bytes_left > 0:
-                        chunk_size = min(bytes_left, 64 * 1024)
-                        data = f.read(chunk_size)
-                        if not data:
-                            break
-                        bytes_left -= len(data)
-                        yield data
+                def iter_file_range():
+                    with open(path, "rb") as f:
+                        f.seek(start)
+                        bytes_left = length
+                        while bytes_left > 0:
+                            chunk_size = min(bytes_left, 64 * 1024)
+                            data = f.read(chunk_size)
+                            if not data:
+                                break
+                            bytes_left -= len(data)
+                            yield data
 
-            headers = {
-                "Content-Range": f"bytes {start}-{end}/{file_size}",
-                "Accept-Ranges": "bytes",
-                "Content-Length": str(length),
-                "Content-Type": "video/mp4",
-            }
-            return StreamingResponse(iter_file_range(), status_code=206, headers=headers)
+                headers = {
+                    "Content-Range": f"bytes {start}-{end}/{file_size}",
+                    "Accept-Ranges": "bytes",
+                    "Content-Length": str(length),
+                    "Content-Type": "video/mp4",
+                }
+                return StreamingResponse(iter_file_range(), status_code=206, headers=headers)
+            except (ValueError, IndexError):
+                raise HTTPException(
+                    status_code=status.HTTP_416_REQUESTED_RANGE_NOT_SATISFIABLE,
+                    headers={"Content-Range": f"bytes */{file_size}"}
+                )
 
     def iter_full_file():
         with open(path, "rb") as f:
