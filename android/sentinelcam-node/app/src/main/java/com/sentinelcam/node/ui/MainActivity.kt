@@ -30,6 +30,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import com.sentinelcam.node.data.PreferencesManager
+import com.sentinelcam.node.receiver.WatchdogReceiver
 import com.sentinelcam.node.service.CctvForegroundService
 import com.sentinelcam.node.service.NodeState
 import com.sentinelcam.node.service.NodeStateHolder
@@ -38,6 +39,7 @@ import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
     private lateinit var prefs: PreferencesManager
+    private var isBatteryOptIgnored by mutableStateOf(false)
 
     private val permissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
@@ -45,6 +47,7 @@ class MainActivity : ComponentActivity() {
         val cameraGranted = permissions[Manifest.permission.CAMERA] ?: false
         val audioGranted = permissions[Manifest.permission.RECORD_AUDIO] ?: false
         if (cameraGranted && audioGranted) {
+            checkAndPromptBatteryOptimization()
             startCctvService()
         } else {
             Toast.makeText(this, "Camera and Audio permissions are mandatory for CCTV node operation", Toast.LENGTH_LONG).show()
@@ -55,6 +58,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         prefs = PreferencesManager(this)
 
+        updateBatteryOptimizationState()
         checkAndRequestPermissions()
 
         setContent {
@@ -72,12 +76,28 @@ class MainActivity : ComponentActivity() {
                 ) {
                     CctvNodeDashboard(
                         prefs = prefs,
+                        isBatteryOptimized = isBatteryOptIgnored,
                         onStartService = { startCctvService() },
                         onStopService = { stopCctvService() },
-                        onRequestBatteryOptimization = { requestIgnoreBatteryOptimization() }
+                        onRequestBatteryOptimization = { requestIgnoreBatteryOptimization() },
+                        onOpenAppSettings = { openAppSettings() }
                     )
                 }
             }
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        updateBatteryOptimizationState()
+    }
+
+    private fun updateBatteryOptimizationState() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
+            isBatteryOptIgnored = powerManager.isIgnoringBatteryOptimizations(packageName)
+        } else {
+            isBatteryOptIgnored = true
         }
     }
 
@@ -95,37 +115,68 @@ class MainActivity : ComponentActivity() {
         }
 
         if (allGranted) {
+            checkAndPromptBatteryOptimization()
             startCctvService()
         } else {
             permissionLauncher.launch(permissions.toTypedArray())
         }
     }
 
+    private fun checkAndPromptBatteryOptimization() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
+            if (!powerManager.isIgnoringBatteryOptimizations(packageName)) {
+                requestIgnoreBatteryOptimization()
+            }
+        }
+    }
+
     private fun startCctvService() {
-        val intent = Intent(this, CctvForegroundService::class.java)
+        val intent = Intent(this, CctvForegroundService::class.java).apply {
+            action = CctvForegroundService.ACTION_START
+        }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             startForegroundService(intent)
         } else {
             startService(intent)
         }
+        WatchdogReceiver.scheduleWatchdog(this)
     }
 
     private fun stopCctvService() {
-        val intent = Intent(this, CctvForegroundService::class.java)
-        stopService(intent)
+        val intent = Intent(this, CctvForegroundService::class.java).apply {
+            action = CctvForegroundService.ACTION_STOP
+        }
+        startService(intent)
+        WatchdogReceiver.cancelWatchdog(this)
     }
 
     private fun requestIgnoreBatteryOptimization() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
             if (!powerManager.isIgnoringBatteryOptimizations(packageName)) {
-                val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
-                    data = Uri.parse("package:$packageName")
+                try {
+                    val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+                        data = Uri.parse("package:$packageName")
+                    }
+                    startActivity(intent)
+                } catch (e: Exception) {
+                    openAppSettings()
                 }
-                startActivity(intent)
             } else {
-                Toast.makeText(this, "Battery optimization is already disabled for SentinelCam", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, "Battery optimization is already disabled (24/7 protected)", Toast.LENGTH_SHORT).show()
             }
+        }
+    }
+
+    private fun openAppSettings() {
+        try {
+            val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                data = Uri.parse("package:$packageName")
+            }
+            startActivity(intent)
+        } catch (e: Exception) {
+            Toast.makeText(this, "Unable to open app settings: ${e.message}", Toast.LENGTH_SHORT).show()
         }
     }
 }
@@ -134,9 +185,11 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun CctvNodeDashboard(
     prefs: PreferencesManager,
+    isBatteryOptimized: Boolean,
     onStartService: () -> Unit,
     onStopService: () -> Unit,
-    onRequestBatteryOptimization: () -> Unit
+    onRequestBatteryOptimization: () -> Unit,
+    onOpenAppSettings: () -> Unit
 ) {
     var deviceId by remember { mutableStateOf(prefs.deviceId) }
     var serverUrl by remember { mutableStateOf(prefs.serverUrl) }
@@ -194,14 +247,70 @@ fun CctvNodeDashboard(
                     color = Color.White
                 )
                 Text(
-                    text = "24x7 WebRTC CCTV • Live Streaming",
+                    text = "24x7 CCTV Node • Background Persistent",
                     fontSize = 12.sp,
                     color = Color(0xFF94A3B8)
                 )
             }
         }
 
-        Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(14.dp))
+
+        // Battery Protection Banner
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(
+                containerColor = if (isBatteryOptimized) Color(0xFF064E3B) else Color(0xFF78350F)
+            ),
+            shape = RoundedCornerShape(10.dp)
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Row(
+                    modifier = Modifier.weight(1f),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = if (isBatteryOptimized) Icons.Default.CheckCircle else Icons.Default.Warning,
+                        contentDescription = null,
+                        tint = if (isBatteryOptimized) Color(0xFF34D399) else Color(0xFFFBBF24),
+                        modifier = Modifier.size(24.dp)
+                    )
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Column {
+                        Text(
+                            text = if (isBatteryOptimized) "24x7 Background Protected" else "Background Killing Risk",
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White
+                        )
+                        Text(
+                            text = if (isBatteryOptimized) "Battery optimization disabled (Unrestricted)" else "Android may close app in background. Tap to fix.",
+                            fontSize = 11.sp,
+                            color = Color(0xFFE2E8F0)
+                        )
+                    }
+                }
+
+                if (!isBatteryOptimized) {
+                    Button(
+                        onClick = onRequestBatteryOptimization,
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFF59E0B)),
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                        modifier = Modifier.height(34.dp)
+                    ) {
+                        Text("Fix Now", fontSize = 11.sp, color = Color.Black, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(14.dp))
 
         // 1. Live Authoritative Status Card
         Card(
@@ -290,12 +399,12 @@ fun CctvNodeDashboard(
                     }
 
                     OutlinedButton(
-                        onClick = onRequestBatteryOptimization,
+                        onClick = onOpenAppSettings,
                         modifier = Modifier.weight(1f)
                     ) {
-                        Icon(Icons.Default.BatteryChargingFull, contentDescription = null)
+                        Icon(Icons.Default.Settings, contentDescription = null)
                         Spacer(modifier = Modifier.width(6.dp))
-                        Text("Bypass Doze")
+                        Text("App Settings")
                     }
                 }
             }

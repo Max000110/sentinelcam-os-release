@@ -1,6 +1,7 @@
 package com.sentinelcam.node.service
 
 import android.app.Notification
+import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
@@ -18,9 +19,11 @@ import com.sentinelcam.node.ai.AiObjectDetector
 import com.sentinelcam.node.camera.CameraEngine
 import com.sentinelcam.node.data.PreferencesManager
 import com.sentinelcam.node.face.FaceIntelligenceEngine
+import com.sentinelcam.node.receiver.WatchdogReceiver
 import com.sentinelcam.node.recording.SegmentedRecorder
 import com.sentinelcam.node.signaling.SignalingClient
 import com.sentinelcam.node.telemetry.RealTelemetryCollector
+import com.sentinelcam.node.ui.MainActivity
 import com.sentinelcam.node.webrtc.WebRtcClient
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -30,6 +33,10 @@ import org.webrtc.SessionDescription
 
 class CctvForegroundService : LifecycleService() {
     companion object {
+        const val ACTION_START = "com.sentinelcam.node.action.START"
+        const val ACTION_STOP = "com.sentinelcam.node.action.STOP"
+        const val ACTION_RESTART = "com.sentinelcam.node.action.RESTART"
+
         @Volatile var isRunning = false
         private const val NOTIFICATION_ID = 1001
     }
@@ -47,48 +54,122 @@ class CctvForegroundService : LifecycleService() {
     private var aiDetector: AiObjectDetector? = null
     private var faceEngine: FaceIntelligenceEngine? = null
 
+    @Volatile private var isExplicitlyStopped = false
+    private var areEnginesInitialized = false
+
     override fun onCreate() {
         super.onCreate()
+        Log.i(TAG, "CctvForegroundService onCreate called")
         isRunning = true
+        isExplicitlyStopped = false
         prefs = PreferencesManager(this)
         NodeStateHolder.updateState(NodeState.STARTING)
 
         acquireLocks()
         startForegroundNotification()
         initializeEngines()
+        WatchdogReceiver.scheduleWatchdog(this)
+    }
+
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        super.onStartCommand(intent, flags, startId)
+        val action = intent?.action ?: ACTION_START
+        Log.i(TAG, "CctvForegroundService onStartCommand action: $action (startId: $startId)")
+
+        if (action == ACTION_STOP) {
+            Log.i(TAG, "Explicit stop requested by user")
+            isExplicitlyStopped = true
+            WatchdogReceiver.cancelWatchdog(this)
+            stopForeground(STOP_FOREGROUND_REMOVE)
+            stopSelf()
+            return START_NOT_STICKY
+        }
+
+        isExplicitlyStopped = false
+        isRunning = true
+
+        // Re-verify locks and notification on every startCommand invocation
+        acquireLocks()
+        startForegroundNotification()
+
+        if (!areEnginesInitialized) {
+            initializeEngines()
+        }
+
+        // Schedule periodic watchdog to guarantee self-healing
+        WatchdogReceiver.scheduleWatchdog(this)
+
+        // START_STICKY tells Android OS: if killed by memory pressure, restart service automatically
+        return START_STICKY
     }
 
     private fun acquireLocks() {
         try {
-            val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
-            wakeLock = powerManager.newWakeLock(
-                PowerManager.PARTIAL_WAKE_LOCK,
-                "SentinelCam:24x7CctvWakeLock"
-            ).apply {
-                setReferenceCounted(false)
-                acquire(24 * 60 * 60 * 1000L) // 24 hours
+            if (wakeLock == null || !wakeLock!!.isHeld) {
+                val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
+                wakeLock = powerManager.newWakeLock(
+                    PowerManager.PARTIAL_WAKE_LOCK,
+                    "SentinelCam:24x7CctvWakeLock"
+                ).apply {
+                    setReferenceCounted(false)
+                    acquire() // Indefinite acquisition - 24/7 CCTV operation
+                }
+                Log.i(TAG, "Acquired indefinite Partial WakeLock")
             }
 
-            val wifiManager = applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
-            wifiLock = wifiManager.createWifiLock(
-                WifiManager.WIFI_MODE_FULL_HIGH_PERF,
-                "SentinelCam:24x7WifiLock"
-            ).apply {
-                setReferenceCounted(false)
-                acquire()
+            if (wifiLock == null || !wifiLock!!.isHeld) {
+                val wifiManager = applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
+                val lockType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    WifiManager.WIFI_MODE_FULL_LOW_LATENCY
+                } else {
+                    @Suppress("DEPRECATION")
+                    WifiManager.WIFI_MODE_FULL_HIGH_PERF
+                }
+                wifiLock = wifiManager.createWifiLock(
+                    lockType,
+                    "SentinelCam:24x7WifiLock"
+                ).apply {
+                    setReferenceCounted(false)
+                    acquire()
+                }
+                Log.i(TAG, "Acquired low-latency Wi-Fi Lock")
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Error acquiring locks: ${e.message}")
+            Log.e(TAG, "Error acquiring power/wifi locks: ${e.message}", e)
         }
     }
 
     private fun startForegroundNotification() {
+        val launchIntent = Intent(this, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+        }
+        val pendingIntent = PendingIntent.getActivity(
+            this,
+            0,
+            launchIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val stopIntent = Intent(this, CctvForegroundService::class.java).apply {
+            action = ACTION_STOP
+        }
+        val stopPendingIntent = PendingIntent.getService(
+            this,
+            1,
+            stopIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
         val notification: Notification = NotificationCompat.Builder(this, SentinelApplication.CHANNEL_ID)
-            .setContentTitle("SentinelCam Active (24x7)")
-            .setContentText("CCTV Node streaming & monitoring live")
+            .setContentTitle("SentinelCam Node (24x7 Active)")
+            .setContentText("Camera stream & WebRTC signaling live in background")
             .setSmallIcon(android.R.drawable.ic_menu_camera)
+            .setContentIntent(pendingIntent)
             .setOngoing(true)
-            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+            .setCategory(NotificationCompat.CATEGORY_SERVICE)
+            .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
+            .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Stop Service", stopPendingIntent)
             .build()
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -105,6 +186,9 @@ class CctvForegroundService : LifecycleService() {
     }
 
     private fun initializeEngines() {
+        if (areEnginesInitialized) return
+        areEnginesInitialized = true
+
         recorder = SegmentedRecorder(this, prefs.deviceId)
         faceEngine = FaceIntelligenceEngine(this)
         aiDetector = AiObjectDetector { _ -> }
@@ -128,21 +212,18 @@ class CctvForegroundService : LifecycleService() {
             }
         )
 
-        // 2. Initialize CameraX Engine — WebRTC gets frames FIRST, AI is decoupled
+        // 2. Initialize CameraX Engine
         cameraEngine = CameraEngine(this, this) { nv21Bytes, width, height, rotation ->
-            // CRITICAL: WebRTC frame delivery — zero blocking, no AI in this path
             webRtcClient?.onFrameCaptured(nv21Bytes, width, height, rotation)
             NodeStateHolder.updateFps(cameraEngine?.activeFps ?: 30)
         }
         cameraEngine?.startCamera()
 
-        // AI runs independently on a background thread — never blocks WebRTC
+        // AI background sampling decoupled from camera thread
         val aiThread = Thread({
             while (CctvForegroundService.isRunning) {
                 try {
-                    Thread.sleep(500) // ~2 FPS AI sampling rate — sufficient for detection
-                    // AI detector already has its own rate limiter and executor
-                    // This just decouples the trigger from the camera callback entirely
+                    Thread.sleep(500) // ~2 FPS AI sampling rate
                 } catch (e: InterruptedException) {
                     break
                 }
@@ -151,7 +232,7 @@ class CctvForegroundService : LifecycleService() {
         aiThread.isDaemon = true
         aiThread.start()
 
-        // 3. Initialize Real Telemetry Collector & Register Device
+        // 3. Initialize Real Telemetry Collector
         telemetryCollector = RealTelemetryCollector(
             context = this,
             serverUrl = prefs.serverUrl,
@@ -263,6 +344,7 @@ class CctvForegroundService : LifecycleService() {
     override fun onDestroy() {
         super.onDestroy()
         isRunning = false
+        areEnginesInitialized = false
         NodeStateHolder.updateState(NodeState.STOPPED)
         NodeStateHolder.updateApiStatus("STOPPED")
         NodeStateHolder.updateWsStatus("STOPPED")
@@ -277,7 +359,13 @@ class CctvForegroundService : LifecycleService() {
 
         wakeLock?.let { if (it.isHeld) it.release() }
         wifiLock?.let { if (it.isHeld) it.release() }
-        Log.i(TAG, "CctvForegroundService stopped cleanly")
+
+        if (!isExplicitlyStopped) {
+            Log.w(TAG, "CctvForegroundService destroyed UNEXPECTEDLY by Android OS! Scheduling immediate recovery...")
+            WatchdogReceiver.scheduleWatchdog(applicationContext)
+        } else {
+            Log.i(TAG, "CctvForegroundService stopped cleanly by user")
+        }
     }
 
     override fun onBind(intent: Intent): IBinder? {

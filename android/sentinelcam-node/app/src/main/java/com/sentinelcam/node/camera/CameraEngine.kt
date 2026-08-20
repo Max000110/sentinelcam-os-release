@@ -186,6 +186,22 @@ class CameraEngine(
                 cameraSelector,
                 imageAnalysis
             )
+
+            camera?.cameraInfo?.cameraState?.observe(lifecycleOwner) { state ->
+                Log.d(TAG, "CameraState: ${state.type}, error: ${state.error?.code}")
+                if (state.error != null && !isStopping.get()) {
+                    Log.w(TAG, "Camera hardware error detected (${state.error?.code}). Recovering camera binding...")
+                    ContextCompat.getMainExecutor(context).execute {
+                        if (!isStopping.get()) {
+                            try {
+                                bindCameraUseCases()
+                            } catch (e: Exception) {
+                                Log.e(TAG, "Failed to re-bind camera on error: ${e.message}")
+                            }
+                        }
+                    }
+                }
+            }
         } catch (e: Exception) {
             Log.e(TAG, "Error binding camera lifecycle: ${e.message}", e)
         }
