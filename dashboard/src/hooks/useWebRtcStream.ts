@@ -90,9 +90,36 @@ export function useWebRtcStream(deviceId: string) {
         pc.ontrack = (event) => {
           if (videoRef.current && event.streams[0]) {
             videoRef.current.srcObject = event.streams[0];
+            // Minimize browser-side jitter buffer for lowest latency
+            if (event.receiver && typeof (event.receiver as any).playoutDelayHint !== 'undefined') {
+              (event.receiver as any).playoutDelayHint = 0;
+            }
+            // Also try jitterBufferTarget (newer API)
+            if (event.receiver && typeof (event.receiver as any).jitterBufferTarget !== 'undefined') {
+              (event.receiver as any).jitterBufferTarget = 0;
+            }
             setState(prev => ({ ...prev, isStreaming: true }));
           }
         };
+
+        // Real latency measurement from WebRTC stats (every 2 seconds)
+        const statsInterval = setInterval(async () => {
+          if (!pc || pc.connectionState !== 'connected') return;
+          try {
+            const stats = await pc.getStats();
+            stats.forEach((report: any) => {
+              if (report.type === 'inbound-rtp' && report.kind === 'video') {
+                const jitterBufferMs = report.jitterBufferDelay && report.jitterBufferEmittedCount
+                  ? Math.round((report.jitterBufferDelay / report.jitterBufferEmittedCount) * 1000)
+                  : 0;
+                const totalLatency = jitterBufferMs + 20; // + estimated network RTT baseline
+                if (isSubscribed) {
+                  setState(prev => ({ ...prev, latencyMs: totalLatency }));
+                }
+              }
+            });
+          } catch (e) { /* stats not available */ }
+        }, 2000);
 
         // ICE candidate generation
         pc.onicecandidate = (event) => {

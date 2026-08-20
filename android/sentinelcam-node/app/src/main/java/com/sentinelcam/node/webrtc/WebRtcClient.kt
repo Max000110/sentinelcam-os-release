@@ -141,7 +141,19 @@ class WebRtcClient(
 
         // Add Local Video and Audio Tracks to the PeerConnection
         localVideoTrack?.let { vTrack ->
-            peerConnection?.addTrack(vTrack, listOf("ARDAMS"))
+            val sender = peerConnection?.addTrack(vTrack, listOf("ARDAMS"))
+            // Configure RTP sender for low-latency CCTV streaming
+            sender?.let { rtpSender ->
+                val params = rtpSender.parameters
+                if (params.encodings.isNotEmpty()) {
+                    params.encodings[0].maxBitrateBps = 1_500_000  // 1.5 Mbps cap
+                    params.encodings[0].minBitrateBps = 300_000    // 300 Kbps floor
+                    // Prioritize framerate over resolution when bandwidth-constrained
+                    params.degradationPreference = RtpParameters.DegradationPreference.MAINTAIN_FRAMERATE
+                }
+                rtpSender.parameters = params
+                Log.i(TAG, "RTP sender configured: maxBitrate=1500kbps, degradation=MAINTAIN_FRAMERATE")
+            }
         }
         localAudioTrack?.let { aTrack ->
             peerConnection?.addTrack(aTrack, listOf("ARDAMS"))

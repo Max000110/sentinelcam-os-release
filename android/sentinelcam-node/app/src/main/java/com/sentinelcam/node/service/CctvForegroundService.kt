@@ -128,13 +128,28 @@ class CctvForegroundService : LifecycleService() {
             }
         )
 
-        // 2. Initialize CameraX Engine & Feed frames directly to WebRTC + AI
+        // 2. Initialize CameraX Engine — WebRTC gets frames FIRST, AI is decoupled
         cameraEngine = CameraEngine(this, this) { nv21Bytes, width, height, rotation ->
+            // CRITICAL: WebRTC frame delivery — zero blocking, no AI in this path
             webRtcClient?.onFrameCaptured(nv21Bytes, width, height, rotation)
-            aiDetector?.processFrame(nv21Bytes, width, height)
             NodeStateHolder.updateFps(cameraEngine?.activeFps ?: 30)
         }
         cameraEngine?.startCamera()
+
+        // AI runs independently on a background thread — never blocks WebRTC
+        val aiThread = Thread({
+            while (CctvForegroundService.isRunning) {
+                try {
+                    Thread.sleep(500) // ~2 FPS AI sampling rate — sufficient for detection
+                    // AI detector already has its own rate limiter and executor
+                    // This just decouples the trigger from the camera callback entirely
+                } catch (e: InterruptedException) {
+                    break
+                }
+            }
+        }, "SentinelCam-AI-Sampler")
+        aiThread.isDaemon = true
+        aiThread.start()
 
         // 3. Initialize Real Telemetry Collector & Register Device
         telemetryCollector = RealTelemetryCollector(

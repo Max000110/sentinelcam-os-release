@@ -56,6 +56,9 @@ export function WebRtcPlayer({ videoRef, state, deviceName, onToggleMic }: WebRt
         playsInline
         className="video-stream"
         muted={isMuted}
+        disablePictureInPicture
+        disableRemotePlayback
+        style={{ objectFit: "cover" }}
       />
 
       {/* Stream Status Overlay Badge */}

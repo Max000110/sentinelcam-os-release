@@ -28,7 +28,7 @@ class PreferencesManager(context: Context) {
         set(value) = sharedPreferences.edit().putString("device_id", value).apply()
 
     var serverUrl: String
-        get() = sharedPreferences.getString("server_url", "http://161.118.183.23:8000") ?: "http://161.118.183.23:8000"
+        get() = sharedPreferences.getString("server_url", "http://100.65.29.37:8000") ?: "http://100.65.29.37:8000"
         set(value) = sharedPreferences.edit().putString("server_url", value).apply()
 
     var apiKey: String
