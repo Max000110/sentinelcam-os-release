@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Maximize2, Mic, MicOff, Volume2, VolumeX, Camera } from "lucide-react";
 import { StreamState } from "../hooks/useWebRtcStream";
 
@@ -13,6 +13,26 @@ interface WebRtcPlayerProps {
 
 export function WebRtcPlayer({ videoRef, state, deviceName, onToggleMic }: WebRtcPlayerProps) {
   const [isMuted, setIsMuted] = useState(false);
+
+  // Zero-drift video sync mechanism
+  // If the browser video element buffers more than 35ms behind real-time, catch up immediately
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+
+    const checkDrift = () => {
+      if (video.buffered.length > 0) {
+        const bufferedEnd = video.buffered.end(video.buffered.length - 1);
+        const drift = bufferedEnd - video.currentTime;
+        if (drift > 0.035) { // More than 35ms drift behind real-time
+          video.currentTime = bufferedEnd;
+        }
+      }
+    };
+
+    const interval = setInterval(checkDrift, 250);
+    return () => clearInterval(interval);
+  }, [videoRef]);
 
   const toggleMute = () => {
     if (videoRef.current) {

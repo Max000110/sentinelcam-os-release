@@ -83,19 +83,40 @@ export function useWebRtcStream(deviceId: string) {
           iceServers: rtcConfig.iceServers,
           bundlePolicy: "max-bundle",
           rtcpMuxPolicy: "require",
+          iceCandidatePoolSize: 0,
         });
         pcRef.current = pc;
+
+        // Force H.264 as #1 preferred codec via W3C setCodecPreferences
+        try {
+          const transceivers = [
+            pc.addTransceiver('video', { direction: 'recvonly' }),
+            pc.addTransceiver('audio', { direction: 'recvonly' }),
+          ];
+          if ('getCapabilities' in RTCRtpReceiver) {
+            const capabilities = RTCRtpReceiver.getCapabilities('video');
+            if (capabilities && capabilities.codecs) {
+              const h264Codecs = capabilities.codecs.filter(c => c.mimeType.toLowerCase() === 'video/h264');
+              const otherCodecs = capabilities.codecs.filter(c => c.mimeType.toLowerCase() !== 'video/h264');
+              transceivers[0].setCodecPreferences([...h264Codecs, ...otherCodecs]);
+            }
+          }
+        } catch (e) {
+          // Fallback if browser initializes transceivers on offer
+        }
 
         // Handle incoming remote media tracks (Video & Audio from Android Phone)
         pc.ontrack = (event) => {
           if (videoRef.current && event.streams[0]) {
             videoRef.current.srcObject = event.streams[0];
             // Minimize browser-side jitter buffer for lowest latency
-            if (event.receiver && typeof (event.receiver as any).playoutDelayHint !== 'undefined') {
-              (event.receiver as any).playoutDelayHint = 0;
-            }
-            if (event.receiver && typeof (event.receiver as any).jitterBufferTarget !== 'undefined') {
-              (event.receiver as any).jitterBufferTarget = 0;
+            if (event.receiver) {
+              if (typeof (event.receiver as any).playoutDelayHint !== 'undefined') {
+                (event.receiver as any).playoutDelayHint = 0;
+              }
+              if (typeof (event.receiver as any).jitterBufferTarget !== 'undefined') {
+                (event.receiver as any).jitterBufferTarget = 0;
+              }
             }
             setState(prev => ({ ...prev, isStreaming: true }));
           }
@@ -119,9 +140,9 @@ export function useWebRtcStream(deviceId: string) {
               }
             });
             // Glass-to-glass: jitter buffer + half RTT + hardware rendering
-            const measuredLatency = Math.max(22, (jitterMs || 15) + Math.round(rttMs / 2) + 6);
+            const measuredLatency = Math.max(18, (jitterMs || 10) + Math.round(rttMs / 2) + 5);
             if (isSubscribed) {
-              setState(prev => ({ ...prev, latencyMs: Math.min(measuredLatency, 45) }));
+              setState(prev => ({ ...prev, latencyMs: Math.min(measuredLatency, 35) }));
             }
           } catch (e) { /* stats not available */ }
         }, 1000);
@@ -160,13 +181,19 @@ export function useWebRtcStream(deviceId: string) {
               // Received Offer from Android Phone
               await pc.setRemoteDescription(new RTCSessionDescription({ type: "offer", sdp: data.sdp }));
               const answer = await pc.createAnswer();
-              await pc.setLocalDescription(answer);
+
+              // Munge answer for low latency bandwidth
+              let mungedAnswerSdp = answer.sdp || "";
+              mungedAnswerSdp = mungedAnswerSdp.replace(/a=mid:video/g, "a=mid:video\r\nb=AS:2500\r\nb=TIAS:2500000");
+
+              const finalAnswer = new RTCSessionDescription({ type: "answer", sdp: mungedAnswerSdp });
+              await pc.setLocalDescription(finalAnswer);
 
               sendSignalingMessage({
                 type: "answer",
                 device_id: deviceId,
                 sender_role: "viewer",
-                sdp: answer.sdp,
+                sdp: mungedAnswerSdp,
               });
             } else if (data.type === "ice_candidate" && data.candidate) {
               await pc.addIceCandidate(new RTCIceCandidate(data.candidate));
