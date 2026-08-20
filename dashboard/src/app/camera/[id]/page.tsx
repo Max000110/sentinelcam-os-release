@@ -9,7 +9,7 @@ import { WebRtcPlayer } from "../../../components/WebRtcPlayer";
 import { CanvasAiOverlay, DetectionBox } from "../../../components/CanvasAiOverlay";
 import { DeviceHealthCard } from "../../../components/DeviceHealthCard";
 import { CameraControls } from "../../../components/CameraControls";
-import { ArrowLeft, Sliders, ShieldAlert } from "lucide-react";
+import { ArrowLeft, Sliders } from "lucide-react";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
 
@@ -89,7 +89,7 @@ export default function CameraLivePage() {
           detections={liveDetections}
           zones={zones}
           enabled={aiOverlayEnabled}
-          privacyMode={device?.torch_enabled === false && false}
+          privacyMode={false}
         />
       </div>
 

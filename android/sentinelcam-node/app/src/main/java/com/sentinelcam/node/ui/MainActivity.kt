@@ -142,6 +142,16 @@ fun CctvNodeDashboard(
     var serverUrl by remember { mutableStateOf(prefs.serverUrl) }
     var isPrivacyMode by remember { mutableStateOf(prefs.isPrivacyModeEnabled) }
 
+    // Debounced persistence - avoids AES-256 crypto write on every keystroke
+    LaunchedEffect(deviceId) {
+        kotlinx.coroutines.delay(500L)
+        prefs.deviceId = deviceId
+    }
+    LaunchedEffect(serverUrl) {
+        kotlinx.coroutines.delay(500L)
+        prefs.serverUrl = serverUrl
+    }
+
     val nodeState by NodeStateHolder.connectionState.collectAsState()
     val apiStatus by NodeStateHolder.apiStatus.collectAsState()
     val wsStatus by NodeStateHolder.wsStatus.collectAsState()
@@ -392,10 +402,7 @@ fun CctvNodeDashboard(
 
                 OutlinedTextField(
                     value = deviceId,
-                    onValueChange = {
-                        deviceId = it
-                        prefs.deviceId = it
-                    },
+                    onValueChange = { deviceId = it },
                     label = { Text("Device Identifier") },
                     modifier = Modifier.fillMaxWidth()
                 )
@@ -404,10 +411,7 @@ fun CctvNodeDashboard(
 
                 OutlinedTextField(
                     value = serverUrl,
-                    onValueChange = {
-                        serverUrl = it
-                        prefs.serverUrl = it
-                    },
+                    onValueChange = { serverUrl = it },
                     label = { Text("VPS Server Base URL") },
                     modifier = Modifier.fillMaxWidth()
                 )

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Users, UserPlus, Shield, Trash2, CheckCircle, Lock } from "lucide-react";
+import { Users, UserPlus, Trash2, Lock } from "lucide-react";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
 

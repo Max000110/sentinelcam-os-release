@@ -1,6 +1,5 @@
 package com.sentinelcam.node.ai
 
-import android.content.Context
 import android.graphics.RectF
 import android.util.Log
 import java.util.concurrent.Executors
@@ -14,7 +13,6 @@ data class DetectedObject(
 )
 
 class AiObjectDetector(
-    private val context: Context,
     private val onObjectsDetected: (List<DetectedObject>) -> Unit
 ) {
     private val TAG = "SentinelCam.AiDetector"
@@ -45,6 +43,8 @@ class AiObjectDetector(
         }
         lastInferenceTimeMs = now
 
+        if (executor.isShutdown) return
+
         executor.execute {
             try {
                 // Simulated on-device lightweight TFLite inference
@@ -58,6 +58,10 @@ class AiObjectDetector(
                 Log.e(TAG, "Error in AI inference pipeline: ${e.message}")
             }
         }
+    }
+
+    fun shutdown() {
+        executor.shutdown()
     }
 
     private fun runTfliteInference(yuvBytes: ByteArray, width: Int, height: Int): List<Pair<String, RectF>> {

@@ -1,7 +1,11 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  output: 'standalone',
   reactStrictMode: false,
   poweredByHeader: false,
+  experimental: {
+    optimizePackageImports: ['lucide-react'],
+  },
   async headers() {
     return [
       {

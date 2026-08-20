@@ -26,15 +26,17 @@ android {
     signingConfigs {
         create("release") {
             storeFile = file("sentinelcam-release.jks")
-            storePassword = "sentinel2026"
+            storePassword = System.getenv("KEYSTORE_PASSWORD") ?: "sentinel2026"
             keyAlias = "sentinelcam"
-            keyPassword = "sentinel2026"
+            keyPassword = System.getenv("KEYSTORE_PASSWORD") ?: "sentinel2026"
         }
     }
 
     buildTypes {
         release {
-            isMinifyEnabled = false
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             signingConfig = signingConfigs.getByName("release")
         }
         debug {

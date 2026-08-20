@@ -30,7 +30,7 @@ import org.webrtc.SessionDescription
 
 class CctvForegroundService : LifecycleService() {
     companion object {
-        var isRunning = false
+        @Volatile var isRunning = false
         private const val NOTIFICATION_ID = 1001
     }
 
@@ -107,7 +107,7 @@ class CctvForegroundService : LifecycleService() {
     private fun initializeEngines() {
         recorder = SegmentedRecorder(this, prefs.deviceId)
         faceEngine = FaceIntelligenceEngine(this)
-        aiDetector = AiObjectDetector(this) { _ -> }
+        aiDetector = AiObjectDetector { _ -> }
 
         // 1. Initialize WebRTC Client
         webRtcClient = WebRtcClient(
@@ -272,6 +272,7 @@ class CctvForegroundService : LifecycleService() {
         cameraEngine?.stop()
         webRtcClient?.close()
         signalingClient?.disconnect()
+        aiDetector?.shutdown()
 
         wakeLock?.let { if (it.isHeld) it.release() }
         wifiLock?.let { if (it.isHeld) it.release() }

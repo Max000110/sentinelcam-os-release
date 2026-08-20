@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { fetchDevices, Device } from "../lib/api";
-import { Video, PlusCircle, Battery, Flame, RefreshCw, ChevronRight } from "lucide-react";
+import { Video, RefreshCw, ChevronRight } from "lucide-react";
 
 export default function HomePage() {
   const [devices, setDevices] = useState<Device[]>([]);
@@ -16,9 +16,14 @@ export default function HomePage() {
     setLoading(false);
   };
 
+  const refreshDevices = async () => {
+    const devs = await fetchDevices();
+    setDevices(devs);
+  };
+
   useEffect(() => {
     loadDevices();
-    const interval = setInterval(loadDevices, 10000);
+    const interval = setInterval(refreshDevices, 10000);
     return () => clearInterval(interval);
   }, []);
 
