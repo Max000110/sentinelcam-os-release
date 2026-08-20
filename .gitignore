@@ -46,7 +46,8 @@ backups/
 # Logs & Test Results
 *.log
 test-results/
-reports/
+reports/*
+!reports/security/
 coverage/
 
 # Secrets & Certificates
