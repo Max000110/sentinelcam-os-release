@@ -222,6 +222,8 @@ async def root():
         ]
     }
 
+@app.get("/health")
+@app.get("/api/v1/health")
 @app.get("/api/v1/system/health")
 async def system_health():
     return {
