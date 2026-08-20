@@ -4,44 +4,107 @@ import android.content.Context
 import android.util.Log
 import org.webrtc.*
 import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicBoolean
 
 class WebRtcClient(
     private val context: Context,
     private val onIceCandidateGenerated: (IceCandidate) -> Unit,
     private val onOfferGenerated: (SessionDescription) -> Unit
 ) {
-    private val TAG = "SentinelCam.WebRTC"
-    private val executor = Executors.newSingleThreadExecutor()
+    companion object {
+        private const val TAG = "SentinelCam.WebRTC"
+        private var isFactoryInitialized = false
+
+        val rootEglBase: EglBase by lazy {
+            EglBase.create()
+        }
+
+        @Synchronized
+        fun initializeWebRtc(context: Context) {
+            if (!isFactoryInitialized) {
+                val options = PeerConnectionFactory.InitializationOptions.builder(context)
+                    .setEnableInternalTracer(false)
+                    .createInitializationOptions()
+                PeerConnectionFactory.initialize(options)
+                isFactoryInitialized = true
+            }
+        }
+    }
 
     private var peerConnectionFactory: PeerConnectionFactory? = null
     private var peerConnection: PeerConnection? = null
-    private var localAudioTrack: AudioTrack? = null
+    private var videoSource: VideoSource? = null
     private var localVideoTrack: VideoTrack? = null
+    private var audioSource: AudioSource? = null
+    private var localAudioTrack: AudioTrack? = null
+
+    private val isStreamingActive = AtomicBoolean(false)
+    var rtcConnectionState: String = "NEW"
+    var iceState: String = "NEW"
 
     init {
         initializeFactory()
     }
 
     private fun initializeFactory() {
-        val options = PeerConnectionFactory.InitializationOptions.builder(context)
-            .setEnableInternalTracer(true)
-            .createInitializationOptions()
-        PeerConnectionFactory.initialize(options)
+        initializeWebRtc(context)
 
         val encoderFactory = DefaultVideoEncoderFactory(
-            EglBase.create().eglBaseContext,
+            rootEglBase.eglBaseContext,
             true, // enableIntelVp8Encoder
             true  // enableH264HighProfile
         )
-        val decoderFactory = DefaultVideoDecoderFactory(EglBase.create().eglBaseContext)
+        val decoderFactory = DefaultVideoDecoderFactory(rootEglBase.eglBaseContext)
 
         peerConnectionFactory = PeerConnectionFactory.builder()
             .setVideoEncoderFactory(encoderFactory)
             .setVideoDecoderFactory(decoderFactory)
             .createPeerConnectionFactory()
+
+        createLocalMediaTracks()
+    }
+
+    private fun createLocalMediaTracks() {
+        val factory = peerConnectionFactory ?: return
+
+        // 1. Audio Track with Echo Cancellation & Noise Suppression
+        val audioConstraints = MediaConstraints().apply {
+            mandatory.add(MediaConstraints.KeyValuePair("googEchoCancellation", "true"))
+            mandatory.add(MediaConstraints.KeyValuePair("googAutoGainControl", "true"))
+            mandatory.add(MediaConstraints.KeyValuePair("googHighpassFilter", "true"))
+            mandatory.add(MediaConstraints.KeyValuePair("googNoiseSuppression", "true"))
+        }
+        audioSource = factory.createAudioSource(audioConstraints)
+        localAudioTrack = factory.createAudioTrack("ARDAMSa0", audioSource).apply {
+            setEnabled(true)
+        }
+
+        // 2. Video Track
+        videoSource = factory.createVideoSource(false)
+        localVideoTrack = factory.createVideoTrack("ARDAMSv0", videoSource).apply {
+            setEnabled(true)
+        }
+        Log.i(TAG, "Local Audio & Video tracks initialized successfully")
+    }
+
+    fun onFrameCaptured(nv21: ByteArray, width: Int, height: Int, rotation: Int) {
+        val source = videoSource ?: return
+        if (!isStreamingActive.get()) return
+
+        try {
+            val buffer = NV21Buffer(nv21, width, height, null)
+            val timestampNs = System.nanoTime()
+            val videoFrame = VideoFrame(buffer, rotation, timestampNs)
+            source.capturerObserver.onFrameCaptured(videoFrame)
+            videoFrame.release()
+        } catch (e: Exception) {
+            Log.e(TAG, "Error passing frame to WebRTC: ${e.message}")
+        }
     }
 
     fun startSession(iceServers: List<PeerConnection.IceServer>) {
+        closeCurrentPeerConnection()
+
         val rtcConfig = PeerConnection.RTCConfiguration(iceServers).apply {
             sdpSemantics = PeerConnection.SdpSemantics.UNIFIED_PLAN
             continualGatheringPolicy = PeerConnection.ContinualGatheringPolicy.GATHER_CONTINUALLY
@@ -58,11 +121,13 @@ class WebRtcClient(
             override fun onIceCandidatesRemoved(candidates: Array<out IceCandidate>?) {}
             override fun onSignalingChange(state: PeerConnection.SignalingState?) {}
             override fun onIceConnectionChange(state: PeerConnection.IceConnectionState?) {
+                iceState = state?.name ?: "UNKNOWN"
                 Log.i(TAG, "ICE Connection State: $state")
             }
             override fun onIceConnectionReceivingChange(receiving: Boolean) {}
             override fun onIceGatheringChange(state: PeerConnection.IceGatheringState?) {}
             override fun onConnectionChange(newState: PeerConnection.PeerConnectionState?) {
+                rtcConnectionState = newState?.name ?: "UNKNOWN"
                 Log.i(TAG, "WebRTC PeerConnection State: $newState")
             }
             override fun onAddStream(stream: MediaStream?) {}
@@ -74,6 +139,15 @@ class WebRtcClient(
             }
         })
 
+        // Add Local Video and Audio Tracks to the PeerConnection
+        localVideoTrack?.let { vTrack ->
+            peerConnection?.addTrack(vTrack, listOf("ARDAMS"))
+        }
+        localAudioTrack?.let { aTrack ->
+            peerConnection?.addTrack(aTrack, listOf("ARDAMS"))
+        }
+
+        isStreamingActive.set(true)
         createLocalOffer()
     }
 
@@ -85,15 +159,20 @@ class WebRtcClient(
 
         peerConnection?.createOffer(object : SdpObserver {
             override fun onCreateSuccess(desc: SessionDescription?) {
-                desc?.let {
+                desc?.let { offer ->
                     peerConnection?.setLocalDescription(object : SdpObserver {
                         override fun onCreateSuccess(p0: SessionDescription?) {}
                         override fun onSetSuccess() {
-                            onOfferGenerated(it)
+                            Log.i(TAG, "Local SDP Offer set and dispatched successfully")
+                            onOfferGenerated(offer)
                         }
-                        override fun onCreateFailure(p0: String?) {}
-                        override fun onSetFailure(p0: String?) {}
-                    }, it)
+                        override fun onCreateFailure(err: String?) {
+                            Log.e(TAG, "SetLocalDescription failed: $err")
+                        }
+                        override fun onSetFailure(err: String?) {
+                            Log.e(TAG, "SetLocalDescription error: $err")
+                        }
+                    }, offer)
                 }
             }
             override fun onSetSuccess() {}
@@ -109,7 +188,7 @@ class WebRtcClient(
         peerConnection?.setRemoteDescription(object : SdpObserver {
             override fun onCreateSuccess(p0: SessionDescription?) {}
             override fun onSetSuccess() {
-                Log.i(TAG, "Remote SDP Answer set successfully")
+                Log.i(TAG, "Remote SDP Answer set successfully - Streaming active")
             }
             override fun onCreateFailure(p0: String?) {}
             override fun onSetFailure(p0: String?) {}
@@ -120,8 +199,34 @@ class WebRtcClient(
         peerConnection?.addIceCandidate(candidate)
     }
 
+    private fun closeCurrentPeerConnection() {
+        try {
+            isStreamingActive.set(false)
+            peerConnection?.close()
+            peerConnection = null
+        } catch (e: Exception) {
+            Log.e(TAG, "Error closing peer connection: ${e.message}")
+        }
+    }
+
     fun close() {
-        peerConnection?.close()
-        peerConnection = null
+        isStreamingActive.set(false)
+        closeCurrentPeerConnection()
+        try {
+            localVideoTrack?.dispose()
+            localVideoTrack = null
+            videoSource?.dispose()
+            videoSource = null
+
+            localAudioTrack?.dispose()
+            localAudioTrack = null
+            audioSource?.dispose()
+            audioSource = null
+
+            peerConnectionFactory?.dispose()
+            peerConnectionFactory = null
+        } catch (e: Exception) {
+            Log.e(TAG, "Error releasing WebRTC resources: ${e.message}")
+        }
     }
 }

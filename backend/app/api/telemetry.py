@@ -57,15 +57,16 @@ async def get_latest_telemetry(device_id: str, db: AsyncSession = Depends(get_db
     if not dev_status:
         return {
             "device_id": device_id,
-            "battery_level": 90,
-            "temperature_c": 32.5,
-            "storage_free_mb": 16000,
-            "storage_total_mb": 64000,
-            "network_type": "WIFI",
-            "wifi_rssi_dbm": -55,
-            "is_charging": "AC",
-            "uptime_seconds": 3600,
-            "health_score": device.health_score
+            "battery_level": None,
+            "temperature_c": None,
+            "storage_free_mb": None,
+            "storage_total_mb": None,
+            "network_type": "UNKNOWN",
+            "wifi_rssi_dbm": None,
+            "is_charging": "UNKNOWN",
+            "uptime_seconds": 0,
+            "health_score": device.health_score,
+            "timestamp": None
         }
         
     return {

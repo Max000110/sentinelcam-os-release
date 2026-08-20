@@ -1,11 +1,14 @@
+import re
 from datetime import datetime, timezone
 from typing import Optional
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from app.core.database import get_db
 from app.models.fleet_and_ota import OtaRelease
+from app.models.users import User, UserRole
+from app.core.rbac import require_roles
 
 router = APIRouter(prefix="/ota", tags=["OTA Updates & Rollbacks"])
 
@@ -17,6 +20,20 @@ class OtaPublishRequest(BaseModel):
     min_android_version: int = 24
     release_channel: str = "STABLE" # STABLE, BETA, CANARY
     release_notes: Optional[str] = None
+
+    @field_validator("sha256")
+    @classmethod
+    def validate_sha256(cls, v: str) -> str:
+        if not re.match(r"^[a-fA-F0-9]{64}$", v):
+            raise ValueError("sha256 must be a valid 64-character hexadecimal checksum")
+        return v.lower()
+
+    @field_validator("package_url")
+    @classmethod
+    def validate_package_url(cls, v: str) -> str:
+        if not (v.startswith("https://") or v.startswith("http://") or v.startswith("/uploads/")):
+            raise ValueError("package_url must be a valid HTTP/HTTPS or internal upload URL")
+        return v
 
 @router.get("/check")
 async def check_for_updates(
@@ -45,7 +62,11 @@ async def check_for_updates(
     }
 
 @router.post("/publish")
-async def publish_ota_release(payload: OtaPublishRequest, db: AsyncSession = Depends(get_db)):
+async def publish_ota_release(
+    payload: OtaPublishRequest,
+    current_user: User = Depends(require_roles([UserRole.OWNER, UserRole.ADMIN])),
+    db: AsyncSession = Depends(get_db)
+):
     res = await db.execute(select(OtaRelease).where(OtaRelease.version == payload.version))
     existing = res.scalars().first()
 
@@ -77,7 +98,11 @@ async def publish_ota_release(payload: OtaPublishRequest, db: AsyncSession = Dep
     return {"status": "published", "version": release.version, "release_id": release.release_id}
 
 @router.post("/rollback")
-async def rollback_ota_release(version: str, db: AsyncSession = Depends(get_db)):
+async def rollback_ota_release(
+    version: str,
+    current_user: User = Depends(require_roles([UserRole.OWNER, UserRole.ADMIN])),
+    db: AsyncSession = Depends(get_db)
+):
     res = await db.execute(select(OtaRelease).where(OtaRelease.version == version))
     release = res.scalars().first()
     if not release:
@@ -86,3 +111,4 @@ async def rollback_ota_release(version: str, db: AsyncSession = Depends(get_db))
     release.status = "REVOKED"
     await db.commit()
     return {"status": "revoked", "version": version}
+

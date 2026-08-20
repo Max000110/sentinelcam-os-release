@@ -15,7 +15,9 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -29,6 +31,10 @@ import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import com.sentinelcam.node.data.PreferencesManager
 import com.sentinelcam.node.service.CctvForegroundService
+import com.sentinelcam.node.service.NodeState
+import com.sentinelcam.node.service.NodeStateHolder
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
     private lateinit var prefs: PreferencesManager
@@ -135,11 +141,26 @@ fun CctvNodeDashboard(
     var deviceId by remember { mutableStateOf(prefs.deviceId) }
     var serverUrl by remember { mutableStateOf(prefs.serverUrl) }
     var isPrivacyMode by remember { mutableStateOf(prefs.isPrivacyModeEnabled) }
-    var isServiceRunning by remember { mutableStateOf(CctvForegroundService.isRunning) }
+
+    val nodeState by NodeStateHolder.connectionState.collectAsState()
+    val apiStatus by NodeStateHolder.apiStatus.collectAsState()
+    val wsStatus by NodeStateHolder.wsStatus.collectAsState()
+    val rtcStatus by NodeStateHolder.rtcStatus.collectAsState()
+    val lastError by NodeStateHolder.lastError.collectAsState()
+    val lastSuccess by NodeStateHolder.lastSuccess.collectAsState()
+    val fps by NodeStateHolder.fps.collectAsState()
+
+    var diagnosticResults by remember { mutableStateOf<List<com.sentinelcam.node.diagnostics.ValidationItem>>(emptyList()) }
+    var isRunningDiagnostics by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+    val context = androidx.compose.ui.platform.LocalContext.current
+
+    val isServiceActive = CctvForegroundService.isRunning || nodeState != NodeState.STOPPED
 
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .verticalScroll(rememberScrollState())
             .padding(16.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
@@ -163,16 +184,16 @@ fun CctvNodeDashboard(
                     color = Color.White
                 )
                 Text(
-                    text = "24x7 WebRTC CCTV Camera",
+                    text = "24x7 WebRTC CCTV • Live Streaming",
                     fontSize = 12.sp,
                     color = Color(0xFF94A3B8)
                 )
             }
         }
 
-        Spacer(modifier = Modifier.height(20.dp))
+        Spacer(modifier = Modifier.height(16.dp))
 
-        // Live Status Card
+        // 1. Live Authoritative Status Card
         Card(
             modifier = Modifier.fillMaxWidth(),
             colors = CardDefaults.cardColors(containerColor = Color(0xFF1E293B)),
@@ -185,16 +206,22 @@ fun CctvNodeDashboard(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = "NODE STATUS",
+                        text = "NODE STATE",
                         fontSize = 12.sp,
                         fontWeight = FontWeight.Bold,
                         color = Color(0xFF94A3B8)
                     )
                     Badge(
-                        containerColor = if (isServiceRunning) Color(0xFF00E676) else Color(0xFFEF4444)
+                        containerColor = when (nodeState) {
+                            NodeState.STREAMING -> Color(0xFF00E676)
+                            NodeState.WEBSOCKET_CONNECTED, NodeState.REGISTERED -> Color(0xFF38BDF8)
+                            NodeState.STARTING, NodeState.CONNECTING -> Color(0xFFFBBF24)
+                            NodeState.ERROR -> Color(0xFFEF4444)
+                            else -> if (isServiceActive) Color(0xFF00E676) else Color(0xFF64748B)
+                        }
                     ) {
                         Text(
-                            text = if (isServiceRunning) "ACTIVE 24x7" else "STOPPED",
+                            text = nodeState.name,
                             color = Color.Black,
                             fontWeight = FontWeight.Bold,
                             modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
@@ -202,36 +229,55 @@ fun CctvNodeDashboard(
                     }
                 }
 
-                Spacer(modifier = Modifier.height(12.dp))
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Text(
+                    text = "API: $apiStatus  |  WS: $wsStatus  |  WebRTC: $rtcStatus  |  FPS: $fps",
+                    fontSize = 13.sp,
+                    color = Color(0xFFE2E8F0),
+                    fontWeight = FontWeight.Medium
+                )
+
+                if (lastError != "None") {
+                    Text(
+                        text = "Error: $lastError",
+                        fontSize = 12.sp,
+                        color = Color(0xFFEF4444)
+                    )
+                }
+
+                Text(
+                    text = "Last Success: $lastSuccess",
+                    fontSize = 11.sp,
+                    color = Color(0xFF10B981)
+                )
+
+                Spacer(modifier = Modifier.height(14.dp))
 
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     Button(
                         onClick = {
-                            if (isServiceRunning) {
+                            if (isServiceActive) {
                                 onStopService()
-                                isServiceRunning = false
                             } else {
                                 onStartService()
-                                isServiceRunning = true
                             }
                         },
                         colors = ButtonDefaults.buttonColors(
-                            containerColor = if (isServiceRunning) Color(0xFFEF4444) else Color(0xFF00E676)
+                            containerColor = if (isServiceActive) Color(0xFFEF4444) else Color(0xFF00E676)
                         ),
                         modifier = Modifier.weight(1f)
                     ) {
                         Icon(
-                            imageVector = if (isServiceRunning) Icons.Default.Stop else Icons.Default.PlayArrow,
+                            imageVector = if (isServiceActive) Icons.Default.Stop else Icons.Default.PlayArrow,
                             contentDescription = null
                         )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(if (isServiceRunning) "Stop Service" else "Start Service")
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(if (isServiceActive) "Stop Service" else "Start Service")
                     }
-
-                    Spacer(modifier = Modifier.width(12.dp))
 
                     OutlinedButton(
                         onClick = onRequestBatteryOptimization,
@@ -247,7 +293,88 @@ fun CctvNodeDashboard(
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        // Configuration Card
+        // 2. System Validation Panel
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(containerColor = Color(0xFF1E293B)),
+            shape = RoundedCornerShape(12.dp)
+        ) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "SYSTEM VALIDATION PANEL",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFF94A3B8)
+                    )
+                    Button(
+                        onClick = {
+                            isRunningDiagnostics = true
+                            scope.launch(Dispatchers.IO) {
+                                val validator = com.sentinelcam.node.diagnostics.SystemValidator(
+                                    context = context,
+                                    serverUrl = prefs.serverUrl,
+                                    deviceId = prefs.deviceId
+                                )
+                                val results = validator.runFullDiagnosticSuite()
+                                diagnosticResults = results
+                                isRunningDiagnostics = false
+                            }
+                        },
+                        enabled = !isRunningDiagnostics,
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF38BDF8))
+                    ) {
+                        Text(if (isRunningDiagnostics) "Testing..." else "Run Diagnostics", fontSize = 12.sp)
+                    }
+                }
+
+                if (diagnosticResults.isNotEmpty()) {
+                    Spacer(modifier = Modifier.height(12.dp))
+                    diagnosticResults.forEach { item ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 4.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = item.title,
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = Color.White
+                                )
+                                Text(
+                                    text = item.details,
+                                    fontSize = 11.sp,
+                                    color = Color(0xFF94A3B8)
+                                )
+                            }
+                            Badge(
+                                containerColor = if (item.isPassed) Color(0xFF10B981) else Color(0xFFEF4444)
+                            ) {
+                                Text(
+                                    text = if (item.isPassed) "PASS" else "FAIL",
+                                    color = Color.White,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                )
+                            }
+                        }
+                        Divider(color = Color(0xFF334155), thickness = 0.5.dp)
+                    }
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // 3. Device & Server Configuration Card
         Card(
             modifier = Modifier.fillMaxWidth(),
             colors = CardDefaults.cardColors(containerColor = Color(0xFF1E293B)),
@@ -255,7 +382,7 @@ fun CctvNodeDashboard(
         ) {
             Column(modifier = Modifier.padding(16.dp)) {
                 Text(
-                    text = "DEVICE SETTINGS",
+                    text = "DEVICE CONFIGURATION",
                     fontSize = 12.sp,
                     fontWeight = FontWeight.Bold,
                     color = Color(0xFF94A3B8)
@@ -284,6 +411,36 @@ fun CctvNodeDashboard(
                     label = { Text("VPS Server Base URL") },
                     modifier = Modifier.fillMaxWidth()
                 )
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Button(
+                        onClick = {
+                            serverUrl = "http://161.118.183.23:8000"
+                            prefs.serverUrl = serverUrl
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF475569)),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text("Reset URL", fontSize = 12.sp)
+                    }
+
+                    Button(
+                        onClick = {
+                            prefs.serverUrl = serverUrl
+                            prefs.deviceId = deviceId
+                            Toast.makeText(context, "Settings saved", Toast.LENGTH_SHORT).show()
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00E676)),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text("Save", fontSize = 12.sp, color = Color.Black)
+                    }
+                }
 
                 Spacer(modifier = Modifier.height(12.dp))
 

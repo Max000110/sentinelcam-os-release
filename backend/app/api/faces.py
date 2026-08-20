@@ -1,20 +1,42 @@
 import base64
+import hashlib
 from typing import List, Optional
-from pydantic import BaseModel
+from cryptography.fernet import Fernet
+from pydantic import BaseModel, field_validator
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
+from app.core.config import settings
 from app.core.database import get_db
 from app.models.devices import Device
 from app.models.faces import FaceProfile, FaceEmbedding
 
 router = APIRouter(prefix="/faces", tags=["Known People & Face Intelligence"])
 
+def _get_biometric_cipher() -> Fernet:
+    key = base64.urlsafe_b64encode(hashlib.sha256(settings.JWT_SECRET_KEY.encode("utf-8")).digest())
+    return Fernet(key)
+
 class FaceEnrollRequest(BaseModel):
     display_name: str
     device_id: Optional[str] = None
     embedding_vector: List[float] # Normalized 128-dim or 512-dim face vector
     consent_granted: bool = True
+
+    @field_validator("display_name")
+    @classmethod
+    def validate_name(cls, v: str) -> str:
+        v = v.strip()
+        if len(v) < 2 or len(v) > 100:
+            raise ValueError("display_name must be between 2 and 100 characters")
+        return v
+
+    @field_validator("embedding_vector")
+    @classmethod
+    def validate_vector(cls, v: List[float]) -> List[float]:
+        if len(v) not in (128, 512):
+            raise ValueError("embedding_vector must have exactly 128 or 512 float dimensions")
+        return v
 
 @router.get("/profiles")
 async def list_face_profiles(db: AsyncSession = Depends(get_db)):
@@ -39,9 +61,10 @@ async def enroll_face_profile(payload: FaceEnrollRequest, db: AsyncSession = Dep
             detail="Explicit user consent is mandatory for Known-Person recognition profile enrollment."
         )
 
-    # Convert embedding vector to encrypted string representation
+    # Cryptographically encrypt the biometric embedding vector with AES-GCM/Fernet
     vector_bytes = str(payload.embedding_vector).encode("utf-8")
-    encrypted_payload = base64.b64encode(vector_bytes).decode("utf-8")
+    cipher = _get_biometric_cipher()
+    encrypted_payload = cipher.encrypt(vector_bytes).decode("utf-8")
 
     profile = FaceProfile(
         user_id=1,

@@ -1,3 +1,4 @@
+import re
 import json
 import logging
 from typing import Dict, Set
@@ -5,6 +6,8 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 logger = logging.getLogger("sentinelcam.ws_events")
 router = APIRouter(tags=["Real-time Event Stream"])
+
+DEVICE_ID_REGEX = re.compile(r"^[a-zA-Z0-9_-]{3,64}$")
 
 class EventStreamManager:
     def __init__(self):
@@ -36,11 +39,17 @@ event_stream_manager = EventStreamManager()
 
 @router.websocket("/ws/events/{device_id}")
 async def event_stream_endpoint(websocket: WebSocket, device_id: str):
+    if not DEVICE_ID_REGEX.match(device_id):
+        await websocket.close(code=1008, reason="Invalid device_id format")
+        return
+
     await event_stream_manager.connect(device_id, websocket)
     try:
         while True:
             # Receive any incoming AI detections or telemetry from node
             data_text = await websocket.receive_text()
+            if len(data_text) > 32768:
+                continue
             data = json.loads(data_text)
             await event_stream_manager.broadcast(device_id, data)
     except WebSocketDisconnect:
@@ -48,3 +57,4 @@ async def event_stream_endpoint(websocket: WebSocket, device_id: str):
     except Exception as e:
         logger.error(f"Event WebSocket error: {e}")
         event_stream_manager.disconnect(device_id, websocket)
+

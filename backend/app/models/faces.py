@@ -13,8 +13,8 @@ class FaceProfile(Base):
     display_name = Column(String(100), nullable=False)
     status = Column(String(20), default="ACTIVE") # ACTIVE, DISABLED
     consent_granted = Column(Boolean, default=True) # Explicit opt-in consent
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
-    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+    created_at = Column(DateTime, default=lambda: datetime.utcnow())
+    updated_at = Column(DateTime, default=lambda: datetime.utcnow(), onupdate=lambda: datetime.utcnow())
 
     embeddings = relationship("FaceEmbedding", back_populates="profile", cascade="all, delete-orphan")
 
@@ -27,7 +27,7 @@ class FaceEmbedding(Base):
     embedding_version = Column(String(20), default="1.0")
     encrypted_embedding = Column(Text, nullable=False) # AES-256-GCM encrypted vector payload
     model_version = Column(String(50), default="mobilefacenet-v1")
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(DateTime, default=lambda: datetime.utcnow())
     revoked_at = Column(DateTime, nullable=True)
 
     profile = relationship("FaceProfile", back_populates="embeddings")

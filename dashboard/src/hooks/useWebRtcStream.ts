@@ -25,7 +25,9 @@ export function useWebRtcStream(deviceId: string) {
   const wsRef = useRef<WebSocket | null>(null);
   const localMicStreamRef = useRef<MediaStream | null>(null);
 
-  const WS_BASE = (process.env.NEXT_PUBLIC_WS_URL || "ws://127.0.0.1:8000") + `/ws/signaling/viewer/${deviceId}`;
+  const WS_BASE = typeof window !== 'undefined' 
+    ? `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.hostname}:8000/ws/signaling/viewer/${deviceId}`
+    : `ws://127.0.0.1:8000/ws/signaling/viewer/${deviceId}`;
 
   const sendSignalingMessage = useCallback((msg: object) => {
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
@@ -118,9 +120,9 @@ export function useWebRtcStream(deviceId: string) {
             const data = JSON.parse(event.data);
             if (data.type === "room_joined") {
               setState(prev => ({ ...prev, nodeOnline: !!data.node_online }));
-            } else if (data.type === "node_online") {
+            } else if (data.type === "node_online" || (data.type === "node_status" && data.is_online)) {
               setState(prev => ({ ...prev, nodeOnline: true }));
-            } else if (data.type === "node_offline") {
+            } else if (data.type === "node_offline" || (data.type === "node_status" && !data.is_online)) {
               setState(prev => ({ ...prev, nodeOnline: false, isStreaming: false }));
             } else if (data.type === "offer") {
               // Received Offer from Android Phone

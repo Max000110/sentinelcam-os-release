@@ -3,7 +3,7 @@
 import { MotionEvent } from "../lib/api";
 import { AlertCircle, Clock, ShieldAlert } from "lucide-react";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || `${API_BASE}`;
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
 
 interface MotionTimelineProps {
   events: MotionEvent[];
@@ -42,7 +42,7 @@ export function MotionTimeline({ events }: MotionTimelineProps) {
 
           {evt.snapshot_url && (
             <a
-              href={${API_BASE}${evt.snapshot_url}`}
+              href={`${API_BASE}${evt.snapshot_url}`}
               target="_blank"
               rel="noreferrer"
               className="btn btn-secondary"

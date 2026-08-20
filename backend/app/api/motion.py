@@ -16,6 +16,10 @@ router = APIRouter(prefix="/motion", tags=["Motion Detection & Events"])
 SNAPSHOT_DIR = str(Path(__file__).resolve().parent.parent.parent / "uploads" / "snapshots")
 os.makedirs(SNAPSHOT_DIR, exist_ok=True)
 
+import re
+
+MAX_SNAPSHOT_SIZE = 10 * 1024 * 1024  # 10 MB
+
 @router.post("/event")
 async def post_motion_event(
     device_id: str = Form(...),
@@ -25,6 +29,9 @@ async def post_motion_event(
     snapshot: Optional[UploadFile] = File(None),
     db: AsyncSession = Depends(get_db)
 ):
+    if not re.match(r"^[a-zA-Z0-9_-]+$", device_id):
+        raise HTTPException(status_code=400, detail="Invalid device_id format")
+
     result = await db.execute(select(Device).where(Device.device_id == device_id))
     device = result.scalars().first()
     if not device:
@@ -34,8 +41,16 @@ async def post_motion_event(
     snapshot_bytes = None
     if snapshot:
         snapshot_bytes = await snapshot.read()
-        filename = f"{device_id}_{uuid.uuid4().hex[:8]}_{int(datetime.now(timezone.utc).timestamp())}.jpg"
-        filepath = os.path.join(SNAPSHOT_DIR, filename)
+        if len(snapshot_bytes) > MAX_SNAPSHOT_SIZE:
+            raise HTTPException(status_code=413, detail="Snapshot image exceeds 10MB limit")
+
+        safe_device_id = re.sub(r"[^a-zA-Z0-9_-]", "", device_id)
+        filename = f"{safe_device_id}_{uuid.uuid4().hex[:8]}_{int(datetime.now(timezone.utc).timestamp())}.jpg"
+        target_path = (Path(SNAPSHOT_DIR) / filename).resolve()
+        if not target_path.is_relative_to(Path(SNAPSHOT_DIR).resolve()):
+            raise HTTPException(status_code=400, detail="Invalid target path")
+
+        filepath = str(target_path)
         with open(filepath, "wb") as f:
             f.write(snapshot_bytes)
         snapshot_url = f"/uploads/snapshots/{filename}"

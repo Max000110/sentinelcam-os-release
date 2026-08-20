@@ -3,6 +3,8 @@ import logging
 from typing import Dict, Set, Optional
 from fastapi import WebSocket
 
+from app.services.turn_service import turn_service
+
 logger = logging.getLogger("sentinelcam.signaling")
 
 class SignalingManager:
@@ -19,7 +21,7 @@ class SignalingManager:
         if device_id in self.active_nodes:
             old_ws = self.active_nodes[device_id]
             try:
-                await old_ws.close(code=1000, reason="Replaced by new node connection")
+                await old_ws.close(code=1000, reason="Superseded by new node connection")
             except Exception:
                 pass
             if old_ws in self.socket_meta:
@@ -29,18 +31,18 @@ class SignalingManager:
         self.socket_meta[websocket] = (device_id, "node")
         logger.info(f"Android CCTV Node connected: {device_id}")
 
-        # Notify active viewers that the camera is now available
+        # Notify any waiting viewers that node came online
         if device_id in self.active_viewers:
             payload = json.dumps({
-                "type": "node_online",
+                "type": "node_status",
                 "device_id": device_id,
-                "message": "CCTV camera node is online and ready"
+                "is_online": True
             })
             for viewer_ws in list(self.active_viewers[device_id]):
                 try:
                     await viewer_ws.send_text(payload)
-                except Exception as e:
-                    logger.error(f"Error sending node_online to viewer: {e}")
+                except Exception:
+                    pass
 
     async def register_viewer(self, device_id: str, websocket: WebSocket):
         if device_id not in self.active_viewers:
@@ -50,21 +52,25 @@ class SignalingManager:
         self.socket_meta[websocket] = (device_id, "viewer")
         logger.info(f"Web Viewer connected to camera: {device_id}")
 
-        # Tell viewer the initial node status
+        # Tell viewer the initial node status and TURN credentials
         node_online = device_id in self.active_nodes
+        ice_config_viewer = turn_service.generate_ice_servers(user_id=f"viewer_{device_id}")
         await websocket.send_text(json.dumps({
             "type": "room_joined",
             "device_id": device_id,
-            "node_online": node_online
+            "node_online": node_online,
+            "ice_servers": [s.model_dump() for s in ice_config_viewer.iceServers]
         }))
 
-        # If node is online, notify the node that a viewer wants a stream
+        # If node is online, notify the node that a viewer wants a stream with TURN credentials
         if node_online:
             node_ws = self.active_nodes[device_id]
+            ice_config_node = turn_service.generate_ice_servers(user_id=f"node_{device_id}")
             try:
                 await node_ws.send_text(json.dumps({
                     "type": "viewer_joined",
-                    "device_id": device_id
+                    "device_id": device_id,
+                    "ice_servers": [s.model_dump() for s in ice_config_node.iceServers]
                 }))
             except Exception as e:
                 logger.error(f"Failed to notify node of viewer joining: {e}")

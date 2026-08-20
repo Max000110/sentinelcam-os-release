@@ -18,6 +18,10 @@ from app.services.telegram_notifier import telegram_notifier
 router = APIRouter(prefix="/ai", tags=["AI & Object Intelligence"])
 logger = logging.getLogger("sentinelcam.ai_api")
 
+import re
+
+MAX_AI_SNAPSHOT_SIZE = 10 * 1024 * 1024  # 10 MB
+
 @router.post("/events")
 async def ingest_ai_event(
     device_id: str = Form(...),
@@ -29,6 +33,9 @@ async def ingest_ai_event(
     snapshot: Optional[UploadFile] = File(None),
     db: AsyncSession = Depends(get_db)
 ):
+    if not re.match(r"^[a-zA-Z0-9_-]+$", device_id):
+        raise HTTPException(status_code=400, detail="Invalid device_id format")
+
     dev_res = await db.execute(select(Device).where(Device.device_id == device_id))
     device = dev_res.scalars().first()
     if not device:
@@ -65,8 +72,17 @@ async def ingest_ai_event(
     snapshot_bytes = None
     if snapshot:
         snapshot_bytes = await snapshot.read()
-        filename = f"ai_{device_id}_{int(datetime.now().timestamp())}.jpg"
-        filepath = str(Path(__file__).resolve().parent.parent.parent / "uploads" / "snapshots" / filename)
+        if len(snapshot_bytes) > MAX_AI_SNAPSHOT_SIZE:
+            raise HTTPException(status_code=413, detail="Snapshot image exceeds 10MB limit")
+
+        safe_device_id = re.sub(r"[^a-zA-Z0-9_-]", "", device_id)
+        filename = f"ai_{safe_device_id}_{int(datetime.now().timestamp())}.jpg"
+        snapshots_dir = (Path(__file__).resolve().parent.parent.parent / "uploads" / "snapshots").resolve()
+        target_path = (snapshots_dir / filename).resolve()
+        if not target_path.is_relative_to(snapshots_dir):
+            raise HTTPException(status_code=400, detail="Invalid target path")
+
+        filepath = str(target_path)
         with open(filepath, "wb") as f:
             f.write(snapshot_bytes)
         thumbnail_url = f"/uploads/snapshots/{filename}"

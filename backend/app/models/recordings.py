@@ -27,7 +27,7 @@ class Recording(Base):
     
     checksum = Column(String(64), nullable=True) # SHA-256
     is_locked = Column(Boolean, default=False) # Prevents auto retention deletion
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(DateTime, default=lambda: datetime.utcnow())
     deleted_at = Column(DateTime, nullable=True)
 
     segments = relationship("RecordingSegment", back_populates="recording", cascade="all, delete-orphan")
@@ -47,6 +47,6 @@ class RecordingSegment(Base):
     path = Column(String(255), nullable=False)
     checksum = Column(String(64), nullable=True)
     status = Column(String(30), default="FINALIZED")
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(DateTime, default=lambda: datetime.utcnow())
 
     recording = relationship("Recording", back_populates="segments")

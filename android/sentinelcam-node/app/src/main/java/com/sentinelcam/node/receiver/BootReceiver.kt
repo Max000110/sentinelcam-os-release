@@ -15,11 +15,17 @@ class BootReceiver : BroadcastReceiver() {
             action == "android.intent.action.QUICKBOOT_POWERON" ||
             action == Intent.ACTION_MY_PACKAGE_REPLACED
         ) {
-            val serviceIntent = Intent(context, CctvForegroundService::class.java)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                context.startForegroundService(serviceIntent)
+            val hasAudio = androidx.core.content.ContextCompat.checkSelfPermission(context, android.Manifest.permission.RECORD_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED
+            val hasCamera = androidx.core.content.ContextCompat.checkSelfPermission(context, android.Manifest.permission.CAMERA) == android.content.pm.PackageManager.PERMISSION_GRANTED
+            if (hasAudio && hasCamera) {
+                val serviceIntent = Intent(context, CctvForegroundService::class.java)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    context.startForegroundService(serviceIntent)
+                } else {
+                    context.startService(serviceIntent)
+                }
             } else {
-                context.startService(serviceIntent)
+                Log.e("SentinelCam.BootReceiver", "Cannot start service on boot: missing permissions")
             }
         }
     }

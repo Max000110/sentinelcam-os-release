@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { Sliders, Plus, Trash2, ShieldCheck, MapPin } from "lucide-react";
 import { fetchDevices, Device } from "../../lib/api";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || `${API_BASE}`;
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
 
 interface ZoneItem {
   id: number;

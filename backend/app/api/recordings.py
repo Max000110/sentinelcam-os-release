@@ -71,6 +71,10 @@ async def toggle_recording_lock(recording_id: int, locked: bool, db: AsyncSessio
     await db.commit()
     return {"id": rec.id, "is_locked": rec.is_locked}
 
+import re
+
+MAX_RECORDING_SIZE = 500 * 1024 * 1024  # 500 MB
+
 @router.post("/upload")
 async def upload_recording_segment(
     device_id: str = Form(...),
@@ -80,6 +84,9 @@ async def upload_recording_segment(
     video_file: UploadFile = File(...),
     db: AsyncSession = Depends(get_db)
 ):
+    if not re.match(r"^[a-zA-Z0-9_-]+$", device_id):
+        raise HTTPException(status_code=400, detail="Invalid device_id format")
+
     dev_res = await db.execute(select(Device).where(Device.device_id == device_id))
     device = dev_res.scalars().first()
     if not device:
@@ -87,10 +94,19 @@ async def upload_recording_segment(
 
     content = await video_file.read()
     file_size = len(content)
+    if file_size > MAX_RECORDING_SIZE:
+        raise HTTPException(status_code=413, detail="File too large (max 500MB)")
+
     sha256_hash = hashlib.sha256(content).hexdigest()
 
-    filename = f"{device_id}_{int(datetime.now().timestamp())}_{uuid.uuid4().hex[:6]}.mp4"
-    filepath = os.path.join(RECORDINGS_DIR, filename)
+    safe_device_id = re.sub(r"[^a-zA-Z0-9_-]", "", device_id)
+    filename = f"{safe_device_id}_{int(datetime.now().timestamp())}_{uuid.uuid4().hex[:6]}.mp4"
+    filepath = str((Path(RECORDINGS_DIR) / filename).resolve())
+    
+    # Path traversal assertion
+    if not Path(filepath).resolve().is_relative_to(Path(RECORDINGS_DIR).resolve()):
+        raise HTTPException(status_code=400, detail="Invalid target path")
+
     with open(filepath, "wb") as f:
         f.write(content)
 
@@ -128,7 +144,12 @@ async def stream_recording_playback(
     if not rec or not rec.file_path or not os.path.exists(rec.file_path):
         raise HTTPException(status_code=404, detail="Recording video file not found")
 
-    path = rec.file_path
+    # Canonical path traversal check
+    resolved_path = Path(rec.file_path).resolve()
+    if not resolved_path.is_relative_to(Path(RECORDINGS_DIR).resolve()):
+        raise HTTPException(status_code=403, detail="Access to file path is restricted")
+
+    path = str(resolved_path)
     file_size = os.path.getsize(path)
 
     # HTTP Range byte streaming
@@ -179,11 +200,19 @@ async def delete_recording(recording_id: int, db: AsyncSession = Depends(get_db)
     if not rec:
         raise HTTPException(status_code=404, detail="Recording not found")
         
+    if rec.is_locked:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Cannot delete locked evidence recording. Unlock the recording first."
+        )
+
     if rec.file_path and os.path.exists(rec.file_path):
-        try:
-            os.remove(rec.file_path)
-        except Exception:
-            pass
+        resolved_path = Path(rec.file_path).resolve()
+        if resolved_path.is_relative_to(Path(RECORDINGS_DIR).resolve()):
+            try:
+                os.remove(str(resolved_path))
+            except Exception:
+                pass
             
     rec.deleted_at = datetime.now(timezone.utc)
     rec.status = "DELETED_BY_USER"

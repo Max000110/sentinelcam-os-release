@@ -8,20 +8,16 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: sentinel
-      POSTGRES_PASSWORD: <CHANGE_ME_POSTGRES_PASSWORD>
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: sentinelcam
     volumes:
       - postgres_data:/var/lib/postgresql/data
-    ports:
-      - "5432:5432"
 
   # 2. Redis Presence & PubSub
   redis:
     image: redis:7-alpine
     container_name: sentinelcam-redis
     restart: unless-stopped
-    ports:
-      - "6379:6379"
 
   # 3. FastAPI WebRTC Signaling & REST API
   backend:
@@ -31,11 +27,11 @@ services:
     container_name: sentinelcam-backend
     restart: unless-stopped
     environment:
-      - DATABASE_URL=postgresql+asyncpg://sentinel:<CHANGE_ME_POSTGRES_PASSWORD>@postgres:5432/sentinelcam
+      - DATABASE_URL=postgresql+asyncpg://sentinel:${POSTGRES_PASSWORD}@postgres:5432/sentinelcam
       - REDIS_URL=redis://redis:6379/0
       - COTURN_ENABLED=true
       - COTURN_PUBLIC_IP=${VPS_PUBLIC_IP:-127.0.0.1}
-      - COTURN_STATIC_AUTH_SECRET=<CHANGE_ME_COTURN_SECRET>
+      - COTURN_STATIC_AUTH_SECRET=${COTURN_STATIC_AUTH_SECRET}
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
       - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID}
     volumes:
@@ -51,6 +47,9 @@ services:
     build:
       context: ../dashboard
       dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: http://${VPS_PUBLIC_IP:-127.0.0.1}:8000
+        NEXT_PUBLIC_WS_URL: ws://${VPS_PUBLIC_IP:-127.0.0.1}:8000
     container_name: sentinelcam-dashboard
     restart: unless-stopped
     environment:

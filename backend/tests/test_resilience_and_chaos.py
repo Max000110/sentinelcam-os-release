@@ -22,8 +22,26 @@ async def test_storage_retention_and_cleanup_worker():
 @pytest.mark.asyncio
 async def test_ota_update_and_signature_check():
     await init_db()
+    async with AsyncSessionLocal() as db:
+        user_res = await db.execute(select(User).where(User.username == "admin"))
+        admin_user = user_res.scalars().first()
+        if not admin_user:
+            admin_user = User(
+                username="admin",
+                email="admin@sentinelcam.local",
+                hashed_password=get_password_hash("test_admin_pass123"),
+                role=UserRole.OWNER,
+                is_active=True
+            )
+            db.add(admin_user)
+            await db.commit()
+
+    from app.core.security import create_access_token
+    admin_token = create_access_token(subject="admin")
+    headers = {"Authorization": f"Bearer {admin_token}"}
+
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-        # 1. Publish new signed OTA release
+        # 1. Publish new signed OTA release (must require admin authorization)
         release_payload = {
             "version": "1.1.0",
             "release_id": "rel_sentinel_110",
@@ -33,10 +51,15 @@ async def test_ota_update_and_signature_check():
             "release_channel": "STABLE",
             "release_notes": "CameraX low-light stability update"
         }
-        res_pub = await ac.post("/api/v1/ota/publish", json=release_payload)
+        # Unauthenticated request must fail with 401
+        res_unauth = await ac.post("/api/v1/ota/publish", json=release_payload)
+        assert res_unauth.status_code in (401, 403)
+
+        # Authenticated Admin request succeeds
+        res_pub = await ac.post("/api/v1/ota/publish", json=release_payload, headers=headers)
         assert res_pub.status_code == 200
 
-        # 2. Check update for older version
+        # 2. Check update for older version (publicly accessible by cameras)
         res_chk = await ac.get("/api/v1/ota/check?current_version=1.0.0&channel=STABLE")
         assert res_chk.status_code == 200
         data = res_chk.json()

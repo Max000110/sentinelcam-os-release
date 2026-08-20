@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { Film, Lock, Unlock, Download, Play, Trash2, RefreshCw } from "lucide-react";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || `${API_BASE}`;
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
 
 interface RecordingItem {
   id: number;
@@ -28,7 +28,7 @@ export default function RecordingsPage() {
   const loadRecordings = async () => {
     setLoading(true);
     try {
-      const res = await fetch(`${API_BASE}/api/v1/recordings", { cache: "no-store" });
+      const res = await fetch(`${API_BASE}/api/v1/recordings`, { cache: "no-store" });
       if (res.ok) {
         const data = await res.json();
         setRecordings(data);
@@ -86,7 +86,7 @@ export default function RecordingsPage() {
           </div>
           <div style={{ background: "#000", borderRadius: 8, overflow: "hidden", aspectRatio: "16 / 9" }}>
             <video
-              src={${API_BASE}${selectedRecording.play_url}`}
+              src={`${API_BASE}${selectedRecording.play_url}`}
               controls
               autoPlay
               style={{ width: "100%", height: "100%" }}
@@ -152,7 +152,7 @@ export default function RecordingsPage() {
                 </button>
 
                 <a
-                  href={${API_BASE}${rec.play_url}`}
+                  href={`${API_BASE}${rec.play_url}`}
                   download
                   className="btn btn-secondary"
                   style={{ padding: "8px 12px" }}

@@ -1,4 +1,5 @@
-from pydantic import BaseModel, ConfigDict
+import re
+from pydantic import BaseModel, ConfigDict, field_validator
 from typing import Optional
 from datetime import datetime
 
@@ -12,8 +13,24 @@ class DeviceBase(BaseModel):
     motion_detection_enabled: Optional[bool] = True
     motion_sensitivity: Optional[int] = 50
 
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, v: str) -> str:
+        v = v.strip()
+        if len(v) < 1 or len(v) > 100:
+            raise ValueError("Device name must be between 1 and 100 characters")
+        return v
+
 class DeviceRegister(DeviceBase):
     device_id: str
+
+    @field_validator("device_id")
+    @classmethod
+    def validate_device_id(cls, v: str) -> str:
+        v = v.strip()
+        if not re.match(r"^[a-zA-Z0-9_-]{3,64}$", v):
+            raise ValueError("device_id must be 3-64 characters alphanumeric, underscores, or hyphens")
+        return v
 
 class DeviceUpdate(BaseModel):
     name: Optional[str] = None
@@ -28,7 +45,7 @@ class DeviceUpdate(BaseModel):
 class DeviceResponse(DeviceBase):
     id: int
     device_id: str
-    api_key: str
+    api_key: Optional[str] = None
     is_online: bool
     last_seen_at: Optional[datetime] = None
     created_at: datetime

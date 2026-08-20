@@ -1,3 +1,4 @@
+import re
 import json
 import logging
 from typing import Dict
@@ -5,6 +6,8 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 logger = logging.getLogger("sentinelcam.ws_commands")
 router = APIRouter(tags=["Remote Command Hub"])
+
+DEVICE_ID_REGEX = re.compile(r"^[a-zA-Z0-9_-]{3,64}$")
 
 ALLOWLISTED_COMMANDS = {
     "RESTART_SERVICE",
@@ -55,10 +58,16 @@ command_hub = CommandHub()
 
 @router.websocket("/ws/commands/{device_id}")
 async def command_hub_endpoint(websocket: WebSocket, device_id: str):
+    if not DEVICE_ID_REGEX.match(device_id):
+        await websocket.close(code=1008, reason="Invalid device_id format")
+        return
+
     await command_hub.register_node(device_id, websocket)
     try:
         while True:
             text = await websocket.receive_text()
+            if len(text) > 16384:
+                continue
             data = json.loads(text)
             if data.get("type") == "command_ack":
                 logger.info(f"Node {device_id} ACK command: {data.get('command_id')}")
@@ -67,3 +76,4 @@ async def command_hub_endpoint(websocket: WebSocket, device_id: str):
     except Exception as e:
         logger.error(f"Command WebSocket error for {device_id}: {e}")
         command_hub.unregister_node(device_id)
+

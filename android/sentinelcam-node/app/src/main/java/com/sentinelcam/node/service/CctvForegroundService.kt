@@ -11,6 +11,7 @@ import android.os.PowerManager
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.lifecycle.LifecycleService
+import androidx.lifecycle.lifecycleScope
 import com.google.gson.JsonObject
 import com.sentinelcam.node.SentinelApplication
 import com.sentinelcam.node.ai.AiObjectDetector
@@ -19,7 +20,10 @@ import com.sentinelcam.node.data.PreferencesManager
 import com.sentinelcam.node.face.FaceIntelligenceEngine
 import com.sentinelcam.node.recording.SegmentedRecorder
 import com.sentinelcam.node.signaling.SignalingClient
+import com.sentinelcam.node.telemetry.RealTelemetryCollector
 import com.sentinelcam.node.webrtc.WebRtcClient
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import org.webrtc.IceCandidate
 import org.webrtc.PeerConnection
 import org.webrtc.SessionDescription
@@ -38,6 +42,7 @@ class CctvForegroundService : LifecycleService() {
     private var cameraEngine: CameraEngine? = null
     private var webRtcClient: WebRtcClient? = null
     private var signalingClient: SignalingClient? = null
+    private var telemetryCollector: RealTelemetryCollector? = null
     private var recorder: SegmentedRecorder? = null
     private var aiDetector: AiObjectDetector? = null
     private var faceEngine: FaceIntelligenceEngine? = null
@@ -46,6 +51,7 @@ class CctvForegroundService : LifecycleService() {
         super.onCreate()
         isRunning = true
         prefs = PreferencesManager(this)
+        NodeStateHolder.updateState(NodeState.STARTING)
 
         acquireLocks()
         startForegroundNotification()
@@ -53,29 +59,33 @@ class CctvForegroundService : LifecycleService() {
     }
 
     private fun acquireLocks() {
-        val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
-        wakeLock = powerManager.newWakeLock(
-            PowerManager.PARTIAL_WAKE_LOCK,
-            "SentinelCam:24x7CctvWakeLock"
-        ).apply {
-            setReferenceCounted(false)
-            acquire()
-        }
+        try {
+            val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
+            wakeLock = powerManager.newWakeLock(
+                PowerManager.PARTIAL_WAKE_LOCK,
+                "SentinelCam:24x7CctvWakeLock"
+            ).apply {
+                setReferenceCounted(false)
+                acquire(24 * 60 * 60 * 1000L) // 24 hours
+            }
 
-        val wifiManager = applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
-        wifiLock = wifiManager.createWifiLock(
-            WifiManager.WIFI_MODE_FULL_HIGH_PERF,
-            "SentinelCam:24x7WifiLock"
-        ).apply {
-            setReferenceCounted(false)
-            acquire()
+            val wifiManager = applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
+            wifiLock = wifiManager.createWifiLock(
+                WifiManager.WIFI_MODE_FULL_HIGH_PERF,
+                "SentinelCam:24x7WifiLock"
+            ).apply {
+                setReferenceCounted(false)
+                acquire()
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error acquiring locks: ${e.message}")
         }
     }
 
     private fun startForegroundNotification() {
         val notification: Notification = NotificationCompat.Builder(this, SentinelApplication.CHANNEL_ID)
-            .setContentTitle("SentinelCam Active")
-            .setContentText("24x7 CCTV Node streaming & monitoring")
+            .setContentTitle("SentinelCam Active (24x7)")
+            .setContentText("CCTV Node streaming & monitoring live")
             .setSmallIcon(android.R.drawable.ic_menu_camera)
             .setOngoing(true)
             .setPriority(NotificationCompat.PRIORITY_LOW)
@@ -97,15 +107,9 @@ class CctvForegroundService : LifecycleService() {
     private fun initializeEngines() {
         recorder = SegmentedRecorder(this, prefs.deviceId)
         faceEngine = FaceIntelligenceEngine(this)
-        aiDetector = AiObjectDetector(this) { detectedObjects ->
-            // AI detections processed asynchronously
-        }
+        aiDetector = AiObjectDetector(this) { _ -> }
 
-        cameraEngine = CameraEngine(this, this) { yuvBytes, width, height ->
-            aiDetector?.processFrame(yuvBytes, width, height)
-        }
-        cameraEngine?.startCamera()
-
+        // 1. Initialize WebRTC Client
         webRtcClient = WebRtcClient(
             context = this,
             onIceCandidateGenerated = { candidate ->
@@ -120,15 +124,54 @@ class CctvForegroundService : LifecycleService() {
             onOfferGenerated = { offer ->
                 val payload = JsonObject().apply { addProperty("sdp", offer.description) }
                 signalingClient?.sendMessage("offer", payload)
+                NodeStateHolder.updateState(NodeState.STREAMING)
             }
         )
 
+        // 2. Initialize CameraX Engine & Feed frames directly to WebRTC + AI
+        cameraEngine = CameraEngine(this, this) { nv21Bytes, width, height, rotation ->
+            webRtcClient?.onFrameCaptured(nv21Bytes, width, height, rotation)
+            aiDetector?.processFrame(nv21Bytes, width, height)
+            NodeStateHolder.updateFps(cameraEngine?.activeFps ?: 30)
+        }
+        cameraEngine?.startCamera()
+
+        // 3. Initialize Real Telemetry Collector & Register Device
+        telemetryCollector = RealTelemetryCollector(
+            context = this,
+            serverUrl = prefs.serverUrl,
+            deviceId = prefs.deviceId,
+            getFpsProvider = { cameraEngine?.activeFps ?: 30 }
+        )
+        telemetryCollector?.start(intervalSeconds = 10)
+
+        lifecycleScope.launch(Dispatchers.IO) {
+            val regSuccess = telemetryCollector?.registerDeviceSync() ?: false
+            if (regSuccess) {
+                NodeStateHolder.updateApiStatus("CONNECTED")
+                NodeStateHolder.updateState(NodeState.REGISTERED)
+                NodeStateHolder.recordSuccess("Registered device with backend")
+            } else {
+                NodeStateHolder.updateApiStatus("ERROR")
+            }
+        }
+
+        // 4. Initialize WebSocket Signaling Client
         signalingClient = SignalingClient(
             serverUrl = prefs.serverUrl,
             deviceId = prefs.deviceId,
             onMessageReceived = { json -> handleSignalingMessage(json) },
-            onConnected = { Log.i(TAG, "Signaling connected to VPS") },
-            onDisconnected = { Log.w(TAG, "Signaling disconnected from VPS") }
+            onConnected = {
+                Log.i(TAG, "Signaling connected to VPS")
+                NodeStateHolder.updateWsStatus("CONNECTED")
+                NodeStateHolder.updateState(NodeState.WEBSOCKET_CONNECTED)
+                NodeStateHolder.recordSuccess("Signaling WebSocket connected")
+            },
+            onDisconnected = {
+                Log.w(TAG, "Signaling disconnected from VPS")
+                NodeStateHolder.updateWsStatus("DISCONNECTED")
+                NodeStateHolder.updateState(NodeState.DISCONNECTED)
+            }
         )
         signalingClient?.connect()
     }
@@ -137,15 +180,45 @@ class CctvForegroundService : LifecycleService() {
         val type = json.get("type")?.asString ?: return
         when (type) {
             "viewer_joined" -> {
-                // Viewer opened camera page -> Start WebRTC session
-                val defaultIceServers = listOf(
-                    PeerConnection.IceServer.builder("stun:stun.l.google.com:19302").createIceServer()
-                )
-                webRtcClient?.startSession(defaultIceServers)
+                val iceServersList = mutableListOf<PeerConnection.IceServer>()
+                try {
+                    val iceServersJson = json.getAsJsonArray("ice_servers")
+                    if (iceServersJson != null && iceServersJson.size() > 0) {
+                        for (i in 0 until iceServersJson.size()) {
+                            val serverObj = iceServersJson.get(i).asJsonObject
+                            val urlsArray = serverObj.getAsJsonArray("urls")
+                            val username = serverObj.get("username")?.asString
+                            val credential = serverObj.get("credential")?.asString
+                            val urls = mutableListOf<String>()
+                            urlsArray?.forEach { urls.add(it.asString) }
+                            if (urls.isNotEmpty()) {
+                                val builder = PeerConnection.IceServer.builder(urls)
+                                if (!username.isNullOrEmpty() && !credential.isNullOrEmpty()) {
+                                    builder.setUsername(username)
+                                    builder.setPassword(credential)
+                                }
+                                iceServersList.add(builder.createIceServer())
+                            }
+                        }
+                    }
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error parsing ice_servers from viewer_joined: ${e.message}")
+                }
+                if (iceServersList.isEmpty()) {
+                    iceServersList.add(PeerConnection.IceServer.builder("stun:stun.l.google.com:19302").createIceServer())
+                    iceServersList.add(PeerConnection.IceServer.builder("stun:161.118.183.23:3478").createIceServer())
+                }
+                Log.i(TAG, "Starting WebRTC session with ${iceServersList.size} ICE servers")
+                NodeStateHolder.updateRtcStatus("CONNECTING")
+                webRtcClient?.startSession(iceServersList)
             }
             "answer" -> {
                 val sdp = json.get("sdp")?.asString
-                sdp?.let { webRtcClient?.handleRemoteAnswer(it) }
+                sdp?.let {
+                    webRtcClient?.handleRemoteAnswer(it)
+                    NodeStateHolder.updateRtcStatus("STREAMING")
+                    NodeStateHolder.updateState(NodeState.STREAMING)
+                }
             }
             "ice_candidate" -> {
                 val cand = json.getAsJsonObject("candidate")
@@ -175,12 +248,19 @@ class CctvForegroundService : LifecycleService() {
     override fun onDestroy() {
         super.onDestroy()
         isRunning = false
+        NodeStateHolder.updateState(NodeState.STOPPED)
+        NodeStateHolder.updateApiStatus("STOPPED")
+        NodeStateHolder.updateWsStatus("STOPPED")
+        NodeStateHolder.updateRtcStatus("STOPPED")
+
+        telemetryCollector?.stop()
         cameraEngine?.stop()
         webRtcClient?.close()
         signalingClient?.disconnect()
 
         wakeLock?.let { if (it.isHeld) it.release() }
         wifiLock?.let { if (it.isHeld) it.release() }
+        Log.i(TAG, "CctvForegroundService stopped cleanly")
     }
 
     override fun onBind(intent: Intent): IBinder? {

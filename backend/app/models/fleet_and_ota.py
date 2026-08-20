@@ -14,7 +14,7 @@ class OtaRelease(Base):
     release_channel = Column(String(20), default="STABLE") # STABLE, BETA, CANARY
     release_notes = Column(Text, nullable=True)
     status = Column(String(20), default="ACTIVE") # ACTIVE, DEPRECATED, REVOKED
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(DateTime, default=lambda: datetime.utcnow())
 
 class DiagnosticReport(Base):
     __tablename__ = "diagnostic_reports"
@@ -23,4 +23,4 @@ class DiagnosticReport(Base):
     device_db_id = Column(Integer, ForeignKey("devices.id"), nullable=False, index=True)
     diagnostic_json = Column(Text, nullable=False) # Sanitized metrics, memory, battery, WebRTC errors
     expires_at = Column(DateTime, nullable=False)
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(DateTime, default=lambda: datetime.utcnow())

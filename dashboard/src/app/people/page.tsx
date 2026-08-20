@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { Users, UserPlus, Shield, Trash2, CheckCircle, Lock } from "lucide-react";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || `${API_BASE}`;
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
 
 interface FaceProfileItem {
   id: number;
@@ -23,7 +23,7 @@ export default function KnownPeoplePage() {
   const loadProfiles = async () => {
     setLoading(true);
     try {
-      const res = await fetch(`${API_BASE}/api/v1/faces/profiles");
+      const res = await fetch(`${API_BASE}/api/v1/faces/profiles`);
       if (res.ok) {
         const data = await res.json();
         setProfiles(data);
@@ -49,7 +49,7 @@ export default function KnownPeoplePage() {
     const mockVector = Array.from({ length: 128 }, () => Math.random() * 0.1);
 
     try {
-      const res = await fetch(`${API_BASE}/api/v1/faces/enroll", {
+      const res = await fetch(`${API_BASE}/api/v1/faces/enroll`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

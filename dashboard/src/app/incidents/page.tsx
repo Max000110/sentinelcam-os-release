@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { AlertTriangle, CheckCircle, Clock, RefreshCw } from "lucide-react";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || `${API_BASE}`;
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
 
 interface IncidentItem {
   id: number;
@@ -22,7 +22,7 @@ export default function IncidentsPage() {
   const loadIncidents = async () => {
     setLoading(true);
     try {
-      const res = await fetch(`${API_BASE}/api/v1/incidents");
+      const res = await fetch(`${API_BASE}/api/v1/incidents`);
       if (res.ok) {
         const data = await res.json();
         setIncidents(data);

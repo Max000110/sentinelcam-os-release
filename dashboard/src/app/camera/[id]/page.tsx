@@ -11,7 +11,7 @@ import { DeviceHealthCard } from "../../../components/DeviceHealthCard";
 import { CameraControls } from "../../../components/CameraControls";
 import { ArrowLeft, Sliders, ShieldAlert } from "lucide-react";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || `${API_BASE}`;
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
 
 export default function CameraLivePage() {
   const params = useParams();
@@ -21,16 +21,7 @@ export default function CameraLivePage() {
   const [telemetry, setTelemetry] = useState<TelemetryData | null>(null);
   const [zones, setZones] = useState<Array<{ name: string; type: string; polygon: number[][] }>>([]);
   const [aiOverlayEnabled, setAiOverlayEnabled] = useState(true);
-  const [liveDetections, setLiveDetections] = useState<DetectionBox[]>([
-    {
-      trackId: 12,
-      objectClass: "person",
-      confidence: 0.94,
-      bbox: { x: 0.28, y: 0.22, w: 0.22, h: 0.55 },
-      isKnownFace: true,
-      faceName: "Authorized Person"
-    }
-  ]);
+  const [liveDetections, setLiveDetections] = useState<DetectionBox[]>([]);
 
   const { videoRef, state, sendCommand, toggleMic } = useWebRtcStream(deviceId);
 
