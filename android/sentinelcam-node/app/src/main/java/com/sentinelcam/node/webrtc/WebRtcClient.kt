@@ -141,23 +141,26 @@ class WebRtcClient(
         })
 
         // Add Local Video and Audio Tracks to the PeerConnection
+        // CRITICAL: Using distinct stream IDs (ARDAMS_V and ARDAMS_A) disables
+        // the browser's A/V synchronization queue, which otherwise delays video
+        // by 50-120ms to match the audio jitter buffer (NetEq)
         localVideoTrack?.let { vTrack ->
-            val sender = peerConnection?.addTrack(vTrack, listOf("ARDAMS"))
+            val sender = peerConnection?.addTrack(vTrack, listOf("ARDAMS_V"))
             // Configure RTP sender for low-latency CCTV streaming
             sender?.let { rtpSender ->
                 val params = rtpSender.parameters
                 if (params.encodings.isNotEmpty()) {
-                    params.encodings[0].maxBitrateBps = 1_500_000  // 1.5 Mbps cap
-                    params.encodings[0].minBitrateBps = 300_000    // 300 Kbps floor
+                    params.encodings[0].maxBitrateBps = 2_000_000  // 2.0 Mbps cap
+                    params.encodings[0].minBitrateBps = 500_000    // 500 Kbps floor
                     // Prioritize framerate over resolution when bandwidth-constrained
                     params.degradationPreference = RtpParameters.DegradationPreference.MAINTAIN_FRAMERATE
                 }
                 rtpSender.parameters = params
-                Log.i(TAG, "RTP sender configured: maxBitrate=1500kbps, degradation=MAINTAIN_FRAMERATE")
+                Log.i(TAG, "RTP sender configured: maxBitrate=2000kbps, degradation=MAINTAIN_FRAMERATE")
             }
         }
         localAudioTrack?.let { aTrack ->
-            peerConnection?.addTrack(aTrack, listOf("ARDAMS"))
+            peerConnection?.addTrack(aTrack, listOf("ARDAMS_A"))
         }
 
         isStreamingActive.set(true)

@@ -107,9 +107,9 @@ export function useWebRtcStream(deviceId: string) {
 
         // Handle incoming remote media tracks (Video & Audio from Android Phone)
         pc.ontrack = (event) => {
-          if (videoRef.current && event.streams[0]) {
-            videoRef.current.srcObject = event.streams[0];
-            // Minimize browser-side jitter buffer for lowest latency
+          if (event.track.kind === 'video' && videoRef.current) {
+            videoRef.current.srcObject = event.streams[0] || new MediaStream([event.track]);
+            // Minimize browser-side video jitter buffer for lowest latency
             if (event.receiver) {
               if (typeof (event.receiver as any).playoutDelayHint !== 'undefined') {
                 (event.receiver as any).playoutDelayHint = 0;
@@ -119,6 +119,21 @@ export function useWebRtcStream(deviceId: string) {
               }
             }
             setState(prev => ({ ...prev, isStreaming: true }));
+          } else if (event.track.kind === 'audio') {
+            // Decoupled audio playback to avoid holding back video VSYNC rendering
+            const audioStream = event.streams[0] || new MediaStream([event.track]);
+            let audioEl = document.getElementById('webrtc-remote-audio') as HTMLAudioElement;
+            if (!audioEl) {
+              audioEl = document.createElement('audio');
+              audioEl.id = 'webrtc-remote-audio';
+              audioEl.style.display = 'none';
+              document.body.appendChild(audioEl);
+            }
+            audioEl.srcObject = audioStream;
+            audioEl.autoplay = true;
+            if (event.receiver && typeof (event.receiver as any).playoutDelayHint !== 'undefined') {
+              (event.receiver as any).playoutDelayHint = 0;
+            }
           }
         };
 

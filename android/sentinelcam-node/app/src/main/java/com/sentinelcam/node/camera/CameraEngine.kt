@@ -15,6 +15,10 @@ import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 
+import android.hardware.camera2.CaptureRequest
+import android.util.Range
+import androidx.camera.camera2.interop.Camera2Interop
+import androidx.camera.camera2.interop.ExperimentalCamera2Interop
 import androidx.camera.core.resolutionselector.AspectRatioStrategy
 import androidx.camera.core.resolutionselector.ResolutionSelector
 import androidx.camera.core.resolutionselector.ResolutionStrategy
@@ -73,6 +77,7 @@ class CameraEngine(
         }, ContextCompat.getMainExecutor(context))
     }
 
+    @androidx.annotation.OptIn(ExperimentalCamera2Interop::class)
     private fun bindCameraUseCases() {
         val provider = cameraProvider ?: return
         try {
@@ -92,11 +97,38 @@ class CameraEngine(
                 .setAspectRatioStrategy(AspectRatioStrategy.RATIO_4_3_FALLBACK_AUTO_STRATEGY)
                 .build()
 
-            val imageAnalysis = ImageAnalysis.Builder()
+            val analysisBuilder = ImageAnalysis.Builder()
                 .setResolutionSelector(resolutionSelector)
                 .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_YUV_420_888)
                 .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
-                .build()
+
+            // Ultra-Low Latency Camera2 ISP Configuration:
+            val camera2Extender = Camera2Interop.Extender(analysisBuilder)
+            // 1. Lock 30 FPS fixed mode (prevents indoor 15-20 FPS exposure throttling)
+            camera2Extender.setCaptureRequestOption(
+                CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE,
+                Range(30, 30)
+            )
+            // 2. Disable video stabilization (eliminates 3-4 frame ISP stabilization queue = ~100ms lag)
+            camera2Extender.setCaptureRequestOption(
+                CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE,
+                CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_OFF
+            )
+            camera2Extender.setCaptureRequestOption(
+                CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE,
+                CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE_OFF
+            )
+            // 3. Set Fast Noise Reduction & Edge modes (prevents multi-frame temporal smoothing)
+            camera2Extender.setCaptureRequestOption(
+                CaptureRequest.NOISE_REDUCTION_MODE,
+                CaptureRequest.NOISE_REDUCTION_MODE_FAST
+            )
+            camera2Extender.setCaptureRequestOption(
+                CaptureRequest.EDGE_MODE,
+                CaptureRequest.EDGE_MODE_FAST
+            )
+
+            val imageAnalysis = analysisBuilder.build()
 
             val executor = analysisExecutor ?: return
 

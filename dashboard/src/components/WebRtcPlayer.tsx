@@ -14,8 +14,8 @@ interface WebRtcPlayerProps {
 export function WebRtcPlayer({ videoRef, state, deviceName, onToggleMic }: WebRtcPlayerProps) {
   const [isMuted, setIsMuted] = useState(false);
 
-  // Zero-drift video sync mechanism
-  // If the browser video element buffers more than 35ms behind real-time, catch up immediately
+  // Zero-drift ultra-low-latency video sync mechanism
+  // If the browser video element buffers more than 20ms behind real-time, catch up immediately
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
@@ -24,13 +24,13 @@ export function WebRtcPlayer({ videoRef, state, deviceName, onToggleMic }: WebRt
       if (video.buffered.length > 0) {
         const bufferedEnd = video.buffered.end(video.buffered.length - 1);
         const drift = bufferedEnd - video.currentTime;
-        if (drift > 0.035) { // More than 35ms drift behind real-time
+        if (drift > 0.020) { // More than 20ms drift behind real-time
           video.currentTime = bufferedEnd;
         }
       }
     };
 
-    const interval = setInterval(checkDrift, 250);
+    const interval = setInterval(checkDrift, 150);
     return () => clearInterval(interval);
   }, [videoRef]);
 
