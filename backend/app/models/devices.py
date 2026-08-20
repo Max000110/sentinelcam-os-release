@@ -17,7 +17,7 @@ class DeviceGroup(Base):
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
     name = Column(String(100), nullable=False)
     description = Column(String(255), nullable=True)
-    created_at = Column(DateTime, default=lambda: datetime.utcnow())
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     devices = relationship("Device", back_populates="group")
 
@@ -27,7 +27,7 @@ class Device(Base):
     id = Column(Integer, primary_key=True, index=True)
     device_id = Column(String(64), unique=True, index=True, nullable=False) # Application-level UUID
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
-    group_id = Column(Integer, ForeignKey("device_groups.id"), nullable=True)
+    group_id = Column(Integer, ForeignKey("device_groups.id"), nullable=True, index=True)
     
     name = Column(String(100), nullable=False)
     location_label = Column(String(100), default="Main Entrance")
@@ -57,8 +57,8 @@ class Device(Base):
     face_recognition_enabled = Column(Boolean, default=False)
     
     last_seen = Column(DateTime, nullable=True)
-    created_at = Column(DateTime, default=lambda: datetime.utcnow())
-    updated_at = Column(DateTime, default=lambda: datetime.utcnow(), onupdate=lambda: datetime.utcnow())
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
     group = relationship("DeviceGroup", back_populates="devices")
     status_detail = relationship("DeviceStatus", back_populates="device", uselist=False, cascade="all, delete-orphan")
@@ -70,7 +70,7 @@ class DeviceCredential(Base):
     id = Column(Integer, primary_key=True, index=True)
     device_db_id = Column(Integer, ForeignKey("devices.id"), nullable=False, index=True)
     credential_hash = Column(String(255), nullable=False)
-    created_at = Column(DateTime, default=lambda: datetime.utcnow())
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     expires_at = Column(DateTime, nullable=True)
     revoked_at = Column(DateTime, nullable=True)
 
@@ -101,7 +101,7 @@ class DeviceStatus(Base):
     rtt_ms = Column(Integer, default=180)
     packet_loss_pct = Column(Float, default=0.0)
     
-    updated_at = Column(DateTime, default=lambda: datetime.utcnow(), onupdate=lambda: datetime.utcnow())
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
     device = relationship("Device", back_populates="status_detail")
 
@@ -112,6 +112,6 @@ class PairingCode(Base):
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
     code = Column(String(16), unique=True, index=True, nullable=False) # e.g. "SENT-8492"
     device_name = Column(String(100), default="New CCTV Node")
-    is_used = Column(Boolean, default=False)
-    expires_at = Column(DateTime, nullable=False)
-    created_at = Column(DateTime, default=lambda: datetime.utcnow())
+    is_used = Column(Boolean, default=False, index=True)
+    expires_at = Column(DateTime, nullable=False, index=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))

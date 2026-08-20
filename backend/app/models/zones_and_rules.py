@@ -22,7 +22,7 @@ class Zone(Base):
     zone_type = Column(Enum(ZoneType), default=ZoneType.PROTECTED, nullable=False)
     polygon_json = Column(Text, nullable=False) # e.g. "[[0.1, 0.2], [0.4, 0.2], [0.4, 0.6], [0.1, 0.6]]"
     is_active = Column(Boolean, default=True)
-    created_at = Column(DateTime, default=lambda: datetime.utcnow())
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
 class Tripwire(Base):
     __tablename__ = "tripwires"
@@ -36,7 +36,7 @@ class Tripwire(Base):
     point_b_y = Column(Float, nullable=False)
     direction = Column(Enum(TripwireDirection), default=TripwireDirection.ANY, nullable=False)
     is_active = Column(Boolean, default=True)
-    created_at = Column(DateTime, default=lambda: datetime.utcnow())
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
 class Rule(Base):
     __tablename__ = "rules"
@@ -47,4 +47,4 @@ class Rule(Base):
     enabled = Column(Boolean, default=True)
     conditions_json = Column(Text, nullable=False) # JSON condition object
     actions_json = Column(Text, nullable=False) # JSON action object (notify, record, severity)
-    created_at = Column(DateTime, default=lambda: datetime.utcnow())
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))

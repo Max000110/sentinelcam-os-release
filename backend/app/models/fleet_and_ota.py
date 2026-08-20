@@ -11,10 +11,10 @@ class OtaRelease(Base):
     sha256 = Column(String(64), nullable=False)
     package_url = Column(String(255), nullable=False)
     min_android_version = Column(Integer, default=24) # Android 7.0+
-    release_channel = Column(String(20), default="STABLE") # STABLE, BETA, CANARY
+    release_channel = Column(String(20), default="STABLE", index=True) # STABLE, BETA, CANARY
     release_notes = Column(Text, nullable=True)
-    status = Column(String(20), default="ACTIVE") # ACTIVE, DEPRECATED, REVOKED
-    created_at = Column(DateTime, default=lambda: datetime.utcnow())
+    status = Column(String(20), default="ACTIVE", index=True) # ACTIVE, DEPRECATED, REVOKED
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
 class DiagnosticReport(Base):
     __tablename__ = "diagnostic_reports"
@@ -22,5 +22,5 @@ class DiagnosticReport(Base):
     id = Column(Integer, primary_key=True, index=True)
     device_db_id = Column(Integer, ForeignKey("devices.id"), nullable=False, index=True)
     diagnostic_json = Column(Text, nullable=False) # Sanitized metrics, memory, battery, WebRTC errors
-    expires_at = Column(DateTime, nullable=False)
-    created_at = Column(DateTime, default=lambda: datetime.utcnow())
+    expires_at = Column(DateTime, nullable=False, index=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))

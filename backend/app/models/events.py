@@ -15,13 +15,13 @@ class MotionEvent(Base):
     id = Column(Integer, primary_key=True, index=True)
     device_db_id = Column(Integer, ForeignKey("devices.id"), nullable=False, index=True)
     
-    started_at = Column(DateTime, default=lambda: datetime.utcnow(), index=True)
+    started_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), index=True)
     ended_at = Column(DateTime, nullable=True)
     confidence = Column(Float, default=1.0)
     event_type = Column(String(50), default="MOTION")
     recording_id = Column(Integer, ForeignKey("recordings.id"), nullable=True)
     thumbnail_path = Column(String(255), nullable=True)
-    created_at = Column(DateTime, default=lambda: datetime.utcnow())
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
 class AiEvent(Base):
     __tablename__ = "ai_events"
@@ -30,11 +30,11 @@ class AiEvent(Base):
     device_db_id = Column(Integer, ForeignKey("devices.id"), nullable=False, index=True)
     
     event_type = Column(String(60), default="PERSON_DETECTED", index=True)
-    severity = Column(Enum(EventSeverity), default=EventSeverity.MEDIUM, nullable=False)
-    object_class = Column(String(40), default="person") # person, car, motorcycle, bicycle, etc.
+    severity = Column(Enum(EventSeverity), default=EventSeverity.MEDIUM, nullable=False, index=True)
+    object_class = Column(String(40), default="person", index=True) # person, car, motorcycle, bicycle, etc.
     track_id = Column(Integer, nullable=True)
     
-    start_time = Column(DateTime, default=lambda: datetime.utcnow(), index=True)
+    start_time = Column(DateTime, default=lambda: datetime.now(timezone.utc), index=True)
     end_time = Column(DateTime, nullable=True)
     duration_seconds = Column(Float, default=0.0)
     
@@ -50,4 +50,4 @@ class AiEvent(Base):
     model_version = Column(String(20), default="1.0.0")
     status = Column(String(30), default="CONFIRMED")
     
-    created_at = Column(DateTime, default=lambda: datetime.utcnow())
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))

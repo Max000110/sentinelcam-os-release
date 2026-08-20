@@ -21,8 +21,8 @@ class User(Base):
     is_active = Column(Boolean, default=True)
     timezone = Column(String(50), default="Asia/Kolkata")
     
-    created_at = Column(DateTime, default=lambda: datetime.utcnow())
-    updated_at = Column(DateTime, default=lambda: datetime.utcnow(), onupdate=lambda: datetime.utcnow())
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
 class UserSession(Base):
     __tablename__ = "user_sessions"
@@ -32,6 +32,6 @@ class UserSession(Base):
     token_jti = Column(String(64), unique=True, index=True, nullable=False)
     user_agent = Column(String(255), nullable=True)
     ip_address = Column(String(45), nullable=True)
-    is_revoked = Column(Boolean, default=False)
-    expires_at = Column(DateTime, nullable=False)
-    created_at = Column(DateTime, default=lambda: datetime.utcnow())
+    is_revoked = Column(Boolean, default=False, index=True)
+    expires_at = Column(DateTime, nullable=False, index=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
