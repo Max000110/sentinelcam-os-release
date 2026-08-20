@@ -15,3 +15,10 @@
 
 # CameraX
 -keep class androidx.camera.** { *; }
+
+# Tink & Security Crypto
+-dontwarn com.google.errorprone.annotations.**
+-dontwarn javax.annotation.**
+-dontwarn java.lang.ClassValue
+-keep class com.google.crypto.tink.** { *; }
+-dontwarn com.google.crypto.tink.**
