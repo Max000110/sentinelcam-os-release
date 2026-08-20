@@ -46,4 +46,12 @@ class PreferencesManager(context: Context) {
     var recordingMode: String
         get() = sharedPreferences.getString("recording_mode", "MOTION") ?: "MOTION"
         set(value) = sharedPreferences.edit().putString("recording_mode", value).apply()
+
+    var autoStartOnBoot: Boolean
+        get() = sharedPreferences.getBoolean("auto_start_on_boot", true)
+        set(value) = sharedPreferences.edit().putBoolean("auto_start_on_boot", value).apply()
+
+    var isBlackScreenModeEnabled: Boolean
+        get() = sharedPreferences.getBoolean("black_screen_mode", false)
+        set(value) = sharedPreferences.edit().putBoolean("black_screen_mode", value).apply()
 }

@@ -9,11 +9,14 @@ import android.os.Build
 import android.os.Bundle
 import android.os.PowerManager
 import android.provider.Settings
+import android.view.WindowManager
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -26,6 +29,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
@@ -35,11 +39,13 @@ import com.sentinelcam.node.service.CctvForegroundService
 import com.sentinelcam.node.service.NodeState
 import com.sentinelcam.node.service.NodeStateHolder
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
     private lateinit var prefs: PreferencesManager
     private var isBatteryOptIgnored by mutableStateOf(false)
+    private var isBlackScreenActive by mutableStateOf(false)
 
     private val permissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
@@ -61,6 +67,10 @@ class MainActivity : ComponentActivity() {
         updateBatteryOptimizationState()
         checkAndRequestPermissions()
 
+        if (intent.getBooleanExtra("AUTO_STARTED_FROM_BOOT", false)) {
+            startCctvService()
+        }
+
         setContent {
             MaterialTheme(
                 colorScheme = darkColorScheme(
@@ -70,18 +80,25 @@ class MainActivity : ComponentActivity() {
                     surface = Color(0xFF1E293B)
                 )
             ) {
-                Surface(
-                    modifier = Modifier.fillMaxSize(),
-                    color = MaterialTheme.colorScheme.background
-                ) {
-                    CctvNodeDashboard(
-                        prefs = prefs,
-                        isBatteryOptimized = isBatteryOptIgnored,
-                        onStartService = { startCctvService() },
-                        onStopService = { stopCctvService() },
-                        onRequestBatteryOptimization = { requestIgnoreBatteryOptimization() },
-                        onOpenAppSettings = { openAppSettings() }
+                if (isBlackScreenActive) {
+                    OledBlackScreenView(
+                        onExitBlackScreen = { setBlackScreenMode(false) }
                     )
+                } else {
+                    Surface(
+                        modifier = Modifier.fillMaxSize(),
+                        color = MaterialTheme.colorScheme.background
+                    ) {
+                        CctvNodeDashboard(
+                            prefs = prefs,
+                            isBatteryOptimized = isBatteryOptIgnored,
+                            onStartService = { startCctvService() },
+                            onStopService = { stopCctvService() },
+                            onRequestBatteryOptimization = { requestIgnoreBatteryOptimization() },
+                            onOpenAppSettings = { openAppSettings() },
+                            onEnterBlackScreen = { setBlackScreenMode(true) }
+                        )
+                    }
                 }
             }
         }
@@ -90,6 +107,21 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         updateBatteryOptimizationState()
+    }
+
+    private fun setBlackScreenMode(enabled: Boolean) {
+        isBlackScreenActive = enabled
+        if (enabled) {
+            window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            val lp = window.attributes
+            lp.screenBrightness = 0.01f // Dim backlight to near 0 for AMOLED power saving
+            window.attributes = lp
+        } else {
+            window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            val lp = window.attributes
+            lp.screenBrightness = WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE
+            window.attributes = lp
+        }
     }
 
     private fun updateBatteryOptimizationState() {
@@ -181,6 +213,65 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+@Composable
+fun OledBlackScreenView(
+    onExitBlackScreen: () -> Unit
+) {
+    var showHint by remember { mutableStateOf(true) }
+    var tapCount by remember { mutableStateOf(0) }
+
+    LaunchedEffect(Unit) {
+        delay(4000L)
+        showHint = false
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black)
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null
+            ) {
+                tapCount++
+                if (tapCount >= 2) {
+                    onExitBlackScreen()
+                } else {
+                    showHint = true
+                }
+            },
+        contentAlignment = Alignment.Center
+    ) {
+        if (showHint) {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                modifier = Modifier.padding(24.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Videocam,
+                    contentDescription = null,
+                    tint = Color(0xFF00E676),
+                    modifier = Modifier.size(40.dp)
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+                Text(
+                    text = "SentinelCam 24x7 OLED Mode",
+                    color = Color.White,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 16.sp
+                )
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(
+                    text = "Camera & WebRTC streaming actively at 0% backlight power.\nDouble-tap screen to unlock controls.",
+                    color = Color(0xFF64748B),
+                    fontSize = 12.sp,
+                    textAlign = TextAlign.Center
+                )
+            }
+        }
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CctvNodeDashboard(
@@ -189,19 +280,21 @@ fun CctvNodeDashboard(
     onStartService: () -> Unit,
     onStopService: () -> Unit,
     onRequestBatteryOptimization: () -> Unit,
-    onOpenAppSettings: () -> Unit
+    onOpenAppSettings: () -> Unit,
+    onEnterBlackScreen: () -> Unit
 ) {
     var deviceId by remember { mutableStateOf(prefs.deviceId) }
     var serverUrl by remember { mutableStateOf(prefs.serverUrl) }
     var isPrivacyMode by remember { mutableStateOf(prefs.isPrivacyModeEnabled) }
+    var autoStartOnBoot by remember { mutableStateOf(prefs.autoStartOnBoot) }
 
     // Debounced persistence - avoids AES-256 crypto write on every keystroke
     LaunchedEffect(deviceId) {
-        kotlinx.coroutines.delay(500L)
+        delay(500L)
         prefs.deviceId = deviceId
     }
     LaunchedEffect(serverUrl) {
-        kotlinx.coroutines.delay(500L)
+        delay(500L)
         prefs.serverUrl = serverUrl
     }
 
@@ -247,7 +340,7 @@ fun CctvNodeDashboard(
                     color = Color.White
                 )
                 Text(
-                    text = "24x7 CCTV Node • Background Persistent",
+                    text = "24x7 Android 14/15/16 CCTV • Auto-Restart on Boot",
                     fontSize = 12.sp,
                     color = Color(0xFF94A3B8)
                 )
@@ -398,14 +491,26 @@ fun CctvNodeDashboard(
                         Text(if (isServiceActive) "Stop Service" else "Start Service")
                     }
 
-                    OutlinedButton(
-                        onClick = onOpenAppSettings,
+                    Button(
+                        onClick = onEnterBlackScreen,
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF334155)),
                         modifier = Modifier.weight(1f)
                     ) {
-                        Icon(Icons.Default.Settings, contentDescription = null)
+                        Icon(Icons.Default.PowerSettingsNew, contentDescription = null, tint = Color(0xFF38BDF8))
                         Spacer(modifier = Modifier.width(6.dp))
-                        Text("App Settings")
+                        Text("OLED Black Screen", fontSize = 11.sp)
                     }
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                OutlinedButton(
+                    onClick = onOpenAppSettings,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(Icons.Default.Settings, contentDescription = null)
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Samsung / Android App Battery Settings")
                 }
             }
         }
@@ -485,7 +590,7 @@ fun CctvNodeDashboard(
                                 )
                             }
                         }
-                        Divider(color = Color(0xFF334155), thickness = 0.5.dp)
+                        HorizontalDivider(color = Color(0xFF334155), thickness = 0.5.dp)
                     }
                 }
             }
@@ -501,7 +606,7 @@ fun CctvNodeDashboard(
         ) {
             Column(modifier = Modifier.padding(16.dp)) {
                 Text(
-                    text = "DEVICE CONFIGURATION",
+                    text = "DEVICE CONFIGURATION & REBOOT SETTINGS",
                     fontSize = 12.sp,
                     fontWeight = FontWeight.Bold,
                     color = Color(0xFF94A3B8)
@@ -555,14 +660,36 @@ fun CctvNodeDashboard(
                     }
                 }
 
-                Spacer(modifier = Modifier.height(12.dp))
+                Spacer(modifier = Modifier.height(14.dp))
 
+                // Auto-Start on Boot toggle
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Column {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Auto-Start on Boot / Reboot", color = Color.White, fontWeight = FontWeight.SemiBold)
+                        Text("Automatically launch 24x7 CCTV stream when phone turns on", color = Color(0xFF94A3B8), fontSize = 12.sp)
+                    }
+                    Switch(
+                        checked = autoStartOnBoot,
+                        onCheckedChange = {
+                            autoStartOnBoot = it
+                            prefs.autoStartOnBoot = it
+                        }
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                // Privacy Mode toggle
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
                         Text("Privacy Mode", color = Color.White, fontWeight = FontWeight.SemiBold)
                         Text("Halt face recognition & AI", color = Color(0xFF94A3B8), fontSize = 12.sp)
                     }
