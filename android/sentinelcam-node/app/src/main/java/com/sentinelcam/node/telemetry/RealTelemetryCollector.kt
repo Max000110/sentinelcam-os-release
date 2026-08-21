@@ -43,9 +43,10 @@ class RealTelemetryCollector(
 
     private fun getCandidateUrls(): List<String> {
         val list = mutableListOf(serverUrl)
+        if (!list.contains("http://161.118.183.23:8000")) list.add("http://161.118.183.23:8000")
+        if (!list.contains("http://100.79.144.65:8000")) list.add("http://100.79.144.65:8000")
         if (!list.contains("http://127.0.0.1:8000")) list.add("http://127.0.0.1:8000")
-        if (!list.contains("http://100.65.29.37:8000")) list.add("http://100.65.29.37:8000")
-        return list
+        return list.filter { it.isNotBlank() }.distinct()
     }
 
     fun start(intervalSeconds: Long = 10) {

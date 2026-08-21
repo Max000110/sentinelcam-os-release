@@ -251,12 +251,25 @@ class WebRtcClient(
         return result.joinToString("\r\n")
     }
 
+    private val queuedCandidates = java.util.concurrent.ConcurrentLinkedQueue<IceCandidate>()
+
     fun handleRemoteAnswer(sdpString: String) {
         val sdp = SessionDescription(SessionDescription.Type.ANSWER, sdpString)
         peerConnection?.setRemoteDescription(object : SdpObserver {
             override fun onCreateSuccess(p0: SessionDescription?) {}
             override fun onSetSuccess() {
                 Log.i(TAG, "Remote SDP Answer set successfully - Streaming active")
+                // Flush queued ICE candidates
+                while (!queuedCandidates.isEmpty()) {
+                    val cand = queuedCandidates.poll()
+                    if (cand != null) {
+                        try {
+                            peerConnection?.addIceCandidate(cand)
+                        } catch (e: Exception) {
+                            Log.w(TAG, "Failed adding queued ICE candidate: ${e.message}")
+                        }
+                    }
+                }
             }
             override fun onCreateFailure(p0: String?) {}
             override fun onSetFailure(p0: String?) {}
@@ -264,7 +277,12 @@ class WebRtcClient(
     }
 
     fun addRemoteIceCandidate(candidate: IceCandidate) {
-        peerConnection?.addIceCandidate(candidate)
+        val pc = peerConnection
+        if (pc != null && pc.remoteDescription != null) {
+            pc.addIceCandidate(candidate)
+        } else {
+            queuedCandidates.add(candidate)
+        }
     }
 
     private fun closeCurrentPeerConnection() {

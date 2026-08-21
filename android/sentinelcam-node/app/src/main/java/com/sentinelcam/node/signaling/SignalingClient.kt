@@ -29,11 +29,11 @@ class SignalingClient(
     private var reconnectAttempt = 0
     private var isClosedManually = false
     private val candidateUrls = listOf(
-        "http://161.118.183.23:8000",
-        "http://127.0.0.1:8000",
         serverUrl,
-        "http://100.65.29.37:8000"
-    ).distinct()
+        "http://161.118.183.23:8000",
+        "http://100.79.144.65:8000",
+        "http://127.0.0.1:8000"
+    ).filter { it.isNotBlank() }.distinct()
     private var candidateIndex = 0
 
     fun connect() {

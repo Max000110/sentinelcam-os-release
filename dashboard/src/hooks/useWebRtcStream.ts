@@ -184,6 +184,8 @@ export function useWebRtcStream(deviceId: string) {
           setState(prev => ({ ...prev, isConnected: true, error: null }));
         };
 
+        const pendingCandidates: RTCIceCandidateInit[] = [];
+
         ws.onmessage = async (event) => {
           try {
             const data = JSON.parse(event.data);
@@ -196,6 +198,19 @@ export function useWebRtcStream(deviceId: string) {
             } else if (data.type === "offer") {
               // Received Offer from Android Phone
               await pc.setRemoteDescription(new RTCSessionDescription({ type: "offer", sdp: data.sdp }));
+              
+              // Flush any ICE candidates that arrived before the offer
+              while (pendingCandidates.length > 0) {
+                const cand = pendingCandidates.shift();
+                if (cand) {
+                  try {
+                    await pc.addIceCandidate(new RTCIceCandidate(cand));
+                  } catch (e) {
+                    console.warn("Failed adding queued ICE candidate:", e);
+                  }
+                }
+              }
+
               const answer = await pc.createAnswer();
 
               // Munge answer for low latency bandwidth
@@ -212,7 +227,11 @@ export function useWebRtcStream(deviceId: string) {
                 sdp: mungedAnswerSdp,
               });
             } else if (data.type === "ice_candidate" && data.candidate) {
-              await pc.addIceCandidate(new RTCIceCandidate(data.candidate));
+              if (pc.remoteDescription && pc.remoteDescription.type) {
+                await pc.addIceCandidate(new RTCIceCandidate(data.candidate));
+              } else {
+                pendingCandidates.push(data.candidate);
+              }
             }
           } catch (e) {
             console.error("Signaling message handling error:", e);

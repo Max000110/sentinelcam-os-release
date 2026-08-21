@@ -2,24 +2,35 @@ package com.sentinelcam.node.data
 
 import android.content.Context
 import android.content.SharedPreferences
+import android.os.Build
+import androidx.core.os.UserManagerCompat
 import androidx.security.crypto.EncryptedSharedPreferences
-import androidx.security.crypto.MasterKeys
+import androidx.security.crypto.MasterKey
 
 class PreferencesManager(context: Context) {
     private val sharedPreferences: SharedPreferences
 
     init {
-        val masterKeyAlias = MasterKeys.getOrCreate(MasterKeys.AES256_GCM_SPEC)
+        val safeContext = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N && !UserManagerCompat.isUserUnlocked(context)) {
+            context.createDeviceProtectedStorageContext()
+        } else {
+            context
+        }
+
         sharedPreferences = try {
+            val masterKey = MasterKey.Builder(safeContext)
+                .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
+                .build()
+
             EncryptedSharedPreferences.create(
+                safeContext,
                 "sentinelcam_secure_prefs",
-                masterKeyAlias,
-                context,
+                masterKey,
                 EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
                 EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
             )
         } catch (e: Exception) {
-            context.getSharedPreferences("sentinelcam_fallback_prefs", Context.MODE_PRIVATE)
+            safeContext.getSharedPreferences("sentinelcam_fallback_prefs", Context.MODE_PRIVATE)
         }
     }
 
