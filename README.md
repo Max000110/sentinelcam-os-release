@@ -12,24 +12,24 @@
 ---
 
 ## 📑 Table of Contents
-- [✨ Key Capabilities](#-key-capabilities)
-- [🏛️ System Architecture](#️-system-architecture)
-- [📱 Android CCTV Node Features](#-android-cctv-node-features)
-- [💻 Web Management Dashboard](#-web-management-dashboard)
-- [⚡ Backend & Signaling Infrastructure](#-backend--signaling-infrastructure)
-- [🛡️ OEM 24/7 Survival Guide (Vivo, Samsung, Xiaomi)](#️-oem-247-survival-guide-vivo-samsung-xiaomi)
-- [🚀 Quick Start & Deployment](#-quick-start--deployment)
-- [📦 Download Production Release APKs](#-download-production-release-apks)
-- [🔒 Security, Network Ports & Firewall](#-security-network-ports--firewall)
-- [📜 Release History & Changelog](#-release-history--changelog)
+- [Key Capabilities](#key-capabilities)
+- [System Architecture](#system-architecture)
+- [Android CCTV Node Features](#android-cctv-node-features)
+- [Web Management Dashboard](#web-management-dashboard)
+- [Backend & Signaling Infrastructure](#backend--signaling-infrastructure)
+- [OEM 24/7 Survival Guide (Vivo, Samsung, Xiaomi)](#oem-247-survival-guide-vivo-samsung-xiaomi)
+- [Quick Start & Deployment](#quick-start--deployment)
+- [Download Production Release APKs](#download-production-release-apks)
+- [Security, Network Ports & Firewall](#security-network-ports--firewall)
+- [Release History & Changelog](#release-history--changelog)
 
 ---
 
-## ✨ Key Capabilities
+## Key Capabilities
 
 - ⚡ **Ultra-Low Latency (<35ms Glass-to-Glass)**: Hardware-accelerated H.264 baseline encoding piped directly through WebRTC peer connections. Zero RTSP/HLS buffering delays.
-- 🔄 **DirectBoot Auto-Start on Phone Reboot**: Starts capturing and streaming automatically when the phone powers on or reboots—**even before the lock screen is unlocked**.
-- 🛡️ **Self-Healing Crash Resurrection Engine**: Catches any unhandled thread exceptions and automatically relaunches the node within 1,000ms via hardware `AlarmManager` wakeup.
+- 🔄 **DirectBoot Auto-Start on Phone Reboot**: Starts capturing and streaming automatically when the phone powers on or reboots—**even before the user enters their lock screen PIN**.
+- 🛡️ **Self-Healing Crash Resurrection Engine**: Intercepts unhandled thread exceptions and automatically relaunches the node within 1,000ms via hardware `AlarmManager` wakeup.
 - 📺 **OLED 0% Backlight Power Mode**: Keeps the camera sensor active 24/7 while dimming the screen to pitch-black (`#000000`) at near-zero power draw, preventing Android HAL camera sleep.
 - 🗣️ **Two-Way Intercom**: Real-time push-to-talk audio streaming with hardware Acoustic Echo Cancellation (AEC) and Noise Suppression (NS).
 - 🚨 **Edge Motion Detection & Snapshots**: Zero server CPU load motion analysis on-device with automatic snapshot uploads and Telegram bot alerts.
@@ -37,11 +37,11 @@
 
 ---
 
-## 🏛️ System Architecture
+## System Architecture
 
 ```mermaid
-graph LR
-    subgraph "Android CCTV Node (Phone)"
+graph TD
+    subgraph NODE["Android CCTV Node (Phone)"]
         CAM["CameraX / Camera2 HAL\n(30 FPS Fixed)"]
         H264["Hardware H.264 Encoder"]
         RTC_N["libwebrtc Native Engine"]
@@ -52,33 +52,33 @@ graph LR
         ALARM -.-> FGS
     end
 
-    subgraph "VPS Server"
-        SIG["FastAPI WebSocket Signaling\n(:8000)"]
-        API["REST API & Auth\n(:8000)"]
-        TURN["CoTURN Server\n(:3478 / UDP 49152-65535)"]
+    subgraph VPS["VPS Server"]
+        SIG["FastAPI WebSocket Signaling (:8000)"]
+        API["REST API & Auth (:8000)"]
+        TURN["CoTURN Server (:3478 / UDP 49152-65535)"]
         PG[("PostgreSQL 16")]
         REDIS[("Redis 7 Cache")]
-        SIG <---> API
-        API <---> PG
-        API <---> REDIS
+        SIG <--> API
+        API <--> PG
+        API <--> REDIS
     end
 
-    subgraph "Web Browser (Dashboard)"
-        DASH["Next.js 14 Web App\n(:3000)"]
+    subgraph BROWSER["Web Browser (Dashboard)"]
+        DASH["Next.js 14 Web App (:3000)"]
         RTC_V["HTML5 Video / RTCPeerConnection"]
         DASH --> RTC_V
     end
 
-    RTC_N <== "Encrypted WebRTC Media (SRTP/DTLS) <35ms" ==> RTC_V
-    RTC_N <--> "Signaling (JSON / WS)" <--> SIG
-    RTC_V <--> "Signaling (JSON / WS)" <--> SIG
-    RTC_N -. "ICE Candidate Relay" .-> TURN
-    RTC_V -. "ICE Candidate Relay" .-> TURN
+    RTC_N -->|Encrypted WebRTC Media SRTP/DTLS <35ms| RTC_V
+    RTC_N <-->|Signaling JSON/WS| SIG
+    RTC_V <-->|Signaling JSON/WS| SIG
+    RTC_N -.->|ICE Candidate Relay| TURN
+    RTC_V -.->|ICE Candidate Relay| TURN
 ```
 
 ---
 
-## 📱 Android CCTV Node Features
+## Android CCTV Node Features
 
 The SentinelCam Android Node (`android/sentinelcam-node`) is designed for 24×7 uninterrupted operation on modern Android devices (Android 14, 15, and 16 Preview).
 
@@ -93,7 +93,7 @@ The SentinelCam Android Node (`android/sentinelcam-node`) is designed for 24×7 
 
 ---
 
-## 💻 Web Management Dashboard
+## Web Management Dashboard
 
 Built with **Next.js 14 App Router**, **TypeScript**, and **Tailwind CSS**.
 
@@ -111,7 +111,7 @@ Built with **Next.js 14 App Router**, **TypeScript**, and **Tailwind CSS**.
 
 ---
 
-## ⚡ Backend & Signaling Infrastructure
+## Backend & Signaling Infrastructure
 
 - **FastAPI Core (`backend/app`)**: Asynchronous REST API, JWT authentication, and WebSocket signaling router.
 - **Presence & State Management**: Redis-backed device heartbeat registry with automatic offline detection.
@@ -120,7 +120,7 @@ Built with **Next.js 14 App Router**, **TypeScript**, and **Tailwind CSS**.
 
 ---
 
-## 🛡️ OEM 24/7 Survival Guide (Vivo, Samsung, Xiaomi)
+## OEM 24/7 Survival Guide (Vivo, Samsung, Xiaomi)
 
 Modern Android OEM skins (Vivo Funtouch OS, Samsung One UI, Xiaomi HyperOS) contain aggressive power management daemons that terminate background applications. Follow these steps for 100% 24/7 reliability:
 
@@ -137,7 +137,7 @@ Modern Android OEM skins (Vivo Funtouch OS, Samsung One UI, Xiaomi HyperOS) cont
 
 ---
 
-## 🚀 Quick Start & Deployment
+## Quick Start & Deployment
 
 ### Method A: 1-Command Docker Deployment (VPS)
 
@@ -192,7 +192,7 @@ cd sentinelcam/android/sentinelcam-node
 
 ---
 
-## 📦 Download Production Release APKs
+## Download Production Release APKs
 
 All signed production APKs are published with SHA-256 verification checksums:
 
@@ -205,7 +205,7 @@ All signed production APKs are published with SHA-256 verification checksums:
 
 ---
 
-## 🔒 Security, Network Ports & Firewall
+## Security, Network Ports & Firewall
 
 For unrestricted WebRTC streaming across cellular carriers and firewalls, configure these ports on your server:
 
@@ -220,7 +220,7 @@ For unrestricted WebRTC streaming across cellular carriers and firewalls, config
 
 ---
 
-## 📜 Release History & Changelog
+## Release History & Changelog
 
 ### [v2.2.0] — 2026-08-29
 - **Fixed**: DirectBoot `KeyStoreException` on Vivo V40 5G using `createDeviceProtectedStorageContext()`.
