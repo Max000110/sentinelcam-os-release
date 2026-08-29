@@ -38,6 +38,7 @@ import com.sentinelcam.node.receiver.WatchdogReceiver
 import com.sentinelcam.node.service.CctvForegroundService
 import com.sentinelcam.node.service.NodeState
 import com.sentinelcam.node.service.NodeStateHolder
+import com.sentinelcam.node.util.OEMBackgroundHelper
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -56,7 +57,7 @@ class MainActivity : ComponentActivity() {
             checkAndPromptBatteryOptimization()
             startCctvService()
         } else {
-            Toast.makeText(this, "Camera and Audio permissions are mandatory for CCTV node operation", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, "Camera and Audio permissions are required for 24x7 CCTV operation", Toast.LENGTH_LONG).show()
         }
     }
 
@@ -67,7 +68,10 @@ class MainActivity : ComponentActivity() {
         updateBatteryOptimizationState()
         checkAndRequestPermissions()
 
-        if (intent.getBooleanExtra("AUTO_STARTED_FROM_BOOT", false)) {
+        val isAutoStarted = intent?.getBooleanExtra("AUTO_STARTED_FROM_BOOT", false) ?: false
+        val isCrashRestart = intent?.getBooleanExtra("CRASH_RESTART", false) ?: false
+
+        if (isAutoStarted || isCrashRestart) {
             startCctvService()
         }
 
@@ -92,10 +96,13 @@ class MainActivity : ComponentActivity() {
                         CctvNodeDashboard(
                             prefs = prefs,
                             isBatteryOptimized = isBatteryOptIgnored,
+                            isVivoDevice = OEMBackgroundHelper.isVivoOrIqoo(),
                             onStartService = { startCctvService() },
                             onStopService = { stopCctvService() },
                             onRequestBatteryOptimization = { requestIgnoreBatteryOptimization() },
                             onOpenAppSettings = { openAppSettings() },
+                            onOpenVivoAutoStart = { OEMBackgroundHelper.openVivoAutoStart(this) },
+                            onOpenVivoPowerWhitelist = { OEMBackgroundHelper.openVivoHighPowerConsumption(this) },
                             onEnterBlackScreen = { setBlackScreenMode(true) }
                         )
                     }
@@ -114,7 +121,7 @@ class MainActivity : ComponentActivity() {
         if (enabled) {
             window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
             val lp = window.attributes
-            lp.screenBrightness = 0.01f // Dim backlight to near 0 for AMOLED power saving
+            lp.screenBrightness = 0.01f
             window.attributes = lp
         } else {
             window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
@@ -167,10 +174,14 @@ class MainActivity : ComponentActivity() {
         val intent = Intent(this, CctvForegroundService::class.java).apply {
             action = CctvForegroundService.ACTION_START
         }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            startForegroundService(intent)
-        } else {
-            startService(intent)
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                startForegroundService(intent)
+            } else {
+                startService(intent)
+            }
+        } catch (e: Exception) {
+            Toast.makeText(this, "Service start note: ${e.message}", Toast.LENGTH_SHORT).show()
         }
         WatchdogReceiver.scheduleWatchdog(this)
     }
@@ -196,20 +207,13 @@ class MainActivity : ComponentActivity() {
                     openAppSettings()
                 }
             } else {
-                Toast.makeText(this, "Battery optimization is already disabled (24/7 protected)", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, "Battery optimization is already disabled", Toast.LENGTH_SHORT).show()
             }
         }
     }
 
     private fun openAppSettings() {
-        try {
-            val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
-                data = Uri.parse("package:$packageName")
-            }
-            startActivity(intent)
-        } catch (e: Exception) {
-            Toast.makeText(this, "Unable to open app settings: ${e.message}", Toast.LENGTH_SHORT).show()
-        }
+        OEMBackgroundHelper.openAppDetails(this)
     }
 }
 
@@ -262,7 +266,7 @@ fun OledBlackScreenView(
                 )
                 Spacer(modifier = Modifier.height(6.dp))
                 Text(
-                    text = "Camera & WebRTC streaming actively at 0% backlight power.\nDouble-tap screen to unlock controls.",
+                    text = "Camera streaming actively at 0% backlight power.\nDouble-tap screen anywhere to unlock controls.",
                     color = Color(0xFF64748B),
                     fontSize = 12.sp,
                     textAlign = TextAlign.Center
@@ -277,10 +281,13 @@ fun OledBlackScreenView(
 fun CctvNodeDashboard(
     prefs: PreferencesManager,
     isBatteryOptimized: Boolean,
+    isVivoDevice: Boolean,
     onStartService: () -> Unit,
     onStopService: () -> Unit,
     onRequestBatteryOptimization: () -> Unit,
     onOpenAppSettings: () -> Unit,
+    onOpenVivoAutoStart: () -> Unit,
+    onOpenVivoPowerWhitelist: () -> Unit,
     onEnterBlackScreen: () -> Unit
 ) {
     var deviceId by remember { mutableStateOf(prefs.deviceId) }
@@ -288,7 +295,6 @@ fun CctvNodeDashboard(
     var isPrivacyMode by remember { mutableStateOf(prefs.isPrivacyModeEnabled) }
     var autoStartOnBoot by remember { mutableStateOf(prefs.autoStartOnBoot) }
 
-    // Debounced persistence - avoids AES-256 crypto write on every keystroke
     LaunchedEffect(deviceId) {
         delay(500L)
         prefs.deviceId = deviceId
@@ -348,6 +354,69 @@ fun CctvNodeDashboard(
         }
 
         Spacer(modifier = Modifier.height(14.dp))
+
+        // Vivo V40 5G / OEM Specific Whitelist Panel
+        if (isVivoDevice) {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = Color(0xFF1E1B4B)),
+                shape = RoundedCornerShape(10.dp)
+            ) {
+                Column(modifier = Modifier.padding(14.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Security,
+                            contentDescription = null,
+                            tint = Color(0xFF818CF8),
+                            modifier = Modifier.size(22.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "Vivo V40 5G / Funtouch OS 24x7 Setup",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 13.sp,
+                            color = Color.White
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        text = "Vivo iManager blocks background apps by default. Enable both settings below to prevent background killing:",
+                        fontSize = 11.sp,
+                        color = Color(0xFFC7D2FE)
+                    )
+
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Button(
+                            onClick = onOpenVivoAutoStart,
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF6366F1)),
+                            modifier = Modifier.weight(1f),
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp)
+                        ) {
+                            Text("1. Auto-Start", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+
+                        Button(
+                            onClick = onOpenVivoPowerWhitelist,
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4F46E5)),
+                            modifier = Modifier.weight(1f),
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp)
+                        ) {
+                            Text("2. High Power", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(14.dp))
+        }
 
         // Battery Protection Banner
         Card(
@@ -510,7 +579,7 @@ fun CctvNodeDashboard(
                 ) {
                     Icon(Icons.Default.Settings, contentDescription = null)
                     Spacer(modifier = Modifier.width(6.dp))
-                    Text("Samsung / Android App Battery Settings")
+                    Text("App Battery & Permission Settings")
                 }
             }
         }

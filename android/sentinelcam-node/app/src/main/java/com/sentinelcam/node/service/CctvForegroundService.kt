@@ -88,7 +88,6 @@ class CctvForegroundService : LifecycleService() {
         isExplicitlyStopped = false
         isRunning = true
 
-        // Re-verify locks and notification on every startCommand invocation
         acquireLocks()
         startForegroundNotification()
 
@@ -96,10 +95,7 @@ class CctvForegroundService : LifecycleService() {
             initializeEngines()
         }
 
-        // Schedule periodic watchdog to guarantee self-healing
         WatchdogReceiver.scheduleWatchdog(this)
-
-        // START_STICKY tells Android OS: if killed by memory pressure, restart service automatically
         return START_STICKY
     }
 
@@ -166,20 +162,31 @@ class CctvForegroundService : LifecycleService() {
             .setSmallIcon(android.R.drawable.ic_menu_camera)
             .setContentIntent(pendingIntent)
             .setOngoing(true)
-            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+            .setPriority(NotificationCompat.PRIORITY_MAX)
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
             .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
             .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Stop Service", stopPendingIntent)
             .build()
 
+        // Resilient Foreground Service Type attachment for Android 14, 15, and 16
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) { // Android 14+
-            var fgsType = ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA or
-                    ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE or
-                    ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
-            if (Build.VERSION.SDK_INT >= 34) {
-                fgsType = fgsType or ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+            try {
+                // Try full FGS types first (when activity is foreground or granted)
+                var fullFgsType = ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA or
+                        ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE or
+                        ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC or
+                        ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+                startForeground(NOTIFICATION_ID, notification, fullFgsType)
+                Log.i(TAG, "startForeground succeeded with full CAMERA|MIC|DATA_SYNC|SPECIAL_USE")
+            } catch (e: Exception) {
+                Log.w(TAG, "Full FGS types rejected from background: ${e.message}. Falling back to SPECIAL_USE...")
+                try {
+                    startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE or ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
+                } catch (e2: Exception) {
+                    Log.e(TAG, "Fallback startForeground failed: ${e2.message}")
+                    startForeground(NOTIFICATION_ID, notification)
+                }
             }
-            startForeground(NOTIFICATION_ID, notification, fgsType)
         } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             startForeground(
                 NOTIFICATION_ID,
@@ -239,7 +246,11 @@ class CctvForegroundService : LifecycleService() {
             webRtcClient?.onFrameCaptured(nv21Bytes, width, height, rotation)
             NodeStateHolder.updateFps(cameraEngine?.activeFps ?: 30)
         }
-        cameraEngine?.startCamera()
+        try {
+            cameraEngine?.startCamera()
+        } catch (e: Exception) {
+            Log.e(TAG, "Camera initial bind error: ${e.message}")
+        }
 
         // AI background sampling decoupled from camera thread
         val aiThread = Thread({
