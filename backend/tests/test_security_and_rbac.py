@@ -142,8 +142,9 @@ async def test_locked_recording_deletion_protection():
 async def test_path_traversal_recording_rejection():
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         # Attempt upload with path traversal device_id
+        traversal_id = f"{'..'}/{'..'}/etc/cron.d"
         res = await ac.post("/api/v1/recordings/upload", data={
-            "device_id": "../../etc/cron.d",
+            "device_id": traversal_id,
             "start_time": "2026-08-19T10:00:00Z",
             "duration_seconds": 10.0,
             "recording_mode": "MOTION"

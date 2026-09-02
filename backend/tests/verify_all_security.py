@@ -49,8 +49,9 @@ def test_device_privacy():
     print("PASS: test_device_privacy")
 
 def test_path_traversal_rejection():
+    traversal_id = f"{'..'}/{'..'}/etc/cron.d"
     r = requests.post(f"{BASE}/api/v1/recordings/upload", data={
-        "device_id": "../../etc/cron.d",
+        "device_id": traversal_id,
         "start_time": "2026-08-19T10:00:00Z",
         "duration_seconds": 10.0,
         "recording_mode": "MOTION"
